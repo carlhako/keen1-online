@@ -188,14 +188,26 @@ The format, one item per line (`#` starts a comment):
 |------|---------|
 | `seed N` | random seed for the levels that follow |
 | `players N` | number of players (1 to 4) |
+| `coop 1` | co-op rules; the replay then drives the whole game (see below) |
 | `level N` | start a segment: play level N |
-| `F P DIR B1 B2` | from frame F of the segment, player P (1-based) holds direction DIR (0-7 clockwise from up, 8 none) and buttons B1 (jump) and B2 (pogo; both = fire) until the next line for that player |
-| `ammo N` | test aid: the segment starts with N raygun charges |
+| `map` | start a segment: the world map, until a level starts (makes the replay drive the whole game) |
+| `F P DIR B1 B2 [EV]` | from frame F of the segment, player P (1-based) holds direction DIR (0-7 clockwise from up, 8 none) and buttons B1 (jump) and B2 (pogo; both = fire) until the next line for that player. EV is a one-frame event that applies at frame F only: 1 restart vote, 2 return-to-map vote, 4 pause on, 8 pause off |
+| `ammo N`, `score N`, `parts JBVW` | test aids: the level segment starts with N raygun charges, N points, or these ship parts (four 0/1 digits: joystick, battery, vacuum, whiskey) |
 | `warp F P X Y` | test aid: at frame F put player P's Keen at tile X,Y |
-| `end F` | the segment stops after F frames (without it, when the level ends) |
+| `tile F X Y T` | test aid: at frame F set the tile at X,Y to tile number T |
+| `shot F FILE` | test aid: save the screen as a PNG after frame F |
+| `view P` | test aid: the screen shows player P (default 1) |
+| `end F` | the segment stops after F frames (without it, when the level or the map phase ends) |
 
-Frames count from 0 at the start of each level. A recorded game replays to the same
-checksums as the run that recorded it.
+Frames count from 0 at the start of each level or map phase. A recorded game replays to the
+same checksums as the run that recorded it.
+
+A replay with `coop 1` or a `map` segment runs the game as it runs live. Each map phase and
+each level the game starts takes the next segment, so a level restarted by a failure or a vote
+simply uses the next `level` segment (the game checks that the kind and level match). A replay
+that starts with a `level` segment starts in that level, like `--level N`. While a replay runs
+`KEEN_FIND=N` lists the tiles with behaviour N in each level, and `KEEN_FIND=tN` the tiles
+with tile number N, as an aid for writing `warp` lines.
 
 ### Tests
 
@@ -239,8 +251,8 @@ Player 1 uses the normal keys. Player 2 uses
 | V | jump |
 | B | pogo stick (V + B together fire the raygun) |
 
-The cheat keys (C+T+Space, G+O+D) read the keyboard directly, so C and D double as P2
-movement keys in this mode.
+`--local2` is a co-op game (below), so the cheat keys are off and C and D are free to be
+P2 movement keys. `--coop` starts a co-op game with one player.
 
 The `KEEN_SCRIPT` test harness (frame-timed key events, run with
 `SDL_VIDEODRIVER=dummy` for headless runs) takes an optional player number on `down` and
@@ -259,6 +271,73 @@ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy KEEN_SCRIPT=tests/scripts/two-player
     ./keen1 --data shareware/data --level 1 --seed 7 --local2 --checksums out.txt
 ```
 
+## Co-op rules
+
+A game started with `--local2` or `--coop` (and later every game from the online lobby) plays
+by co-op rules, so that one player's death or message never freezes the other's game. The
+rules live in `src/coop.c` and the co-op code paths of `engine.c`, `menus.c` and `ui.c`; the
+state they use (`game_t`) is part of every snapshot and checksum. Without `--local2` or
+`--coop` the game plays exactly as the original port does.
+
+**In a level**
+
+- There are no lives and no lives counter: losing a level never ends the game and score
+  never earns an extra Keen. The cheats are off.
+- Each player is alive, dead or exited. A Keen is dead when his death animation ends and
+  exited when he walks through the exit door. A dead or exited player's screen follows the
+  lowest-numbered player still alive.
+- The level succeeds when nobody is alive and at least one player exited: it is marked done,
+  what was collected is kept, and everybody returns to the map. It fails when everybody is
+  dead (nobody exited) and restarts at once.
+- The shared record (score, ammo, keycards, ship parts, pogo, completed levels) is rolled
+  back to how it was when the level started whenever the level fails, restarts by vote or is
+  left by vote, so a ship part picked up in a level you lose is back in the level.
+- Any player, alive or not, votes to restart by holding R for half a second (player 2 in
+  `--local2` uses Y); doing it again withdraws the vote. When every player has voted the
+  level fails and restarts (with one player, at once).
+- Esc opens a menu over the game (the game goes on): M votes to return to the world map, and
+  voting again withdraws. When every player has voted the level ends without being marked
+  done, with the shared record rolled back, and everybody is back on the map.
+- Pending votes show on every screen: "PLAYER 2 WANTS TO RESTART". Votes are cleared when a
+  level starts or ends.
+- The in-level teleporter and the castle switch end the level for everybody, and the Keens
+  land at the teleporter's destination.
+- If the shared record holds all four ship parts after a level succeeds, the ending plays
+  for every player.
+
+**Messages.** Nothing waits for a key. The message of a Yorp statue is a banner shown to
+everybody for about five seconds; the castle switch shakes every screen under a banner and
+the level ends 80 frames later. The status screen (Space) opens only for the player who
+pressed it, over the game, and closes on his next Space or button press; while it is open
+his Keen stands still. Banners are game state (every machine shows the same ones on the same
+frames); overlays are local.
+
+**On the world map**
+
+- Each player walks his own Keen with his own camera; every Keen is drawn on every screen
+  in its colours with its P1/P2 tag, and Keens pass through each other. The Keens start on
+  the same spot.
+- To play a level, press jump or pogo on its entrance (a level that is not done). That makes
+  a *request*: both players see "PLAYER 1 WANTS TO PLAY LEVEL 4", and the other players get
+  an arrow at the edge of their screen pointing at the requester when he is off screen. The
+  level starts when every player has pressed on that same entrance while the request stands
+  (with one player, at once). The request is cancelled when the requester walks off the
+  entrance, and a press on a different entrance makes it that player's request instead.
+- After a level succeeds or is left by vote, every Keen is back at that level's entrance
+  (after the in-level teleporter, at its landing spot) and any request is gone.
+- A map teleporter moves only the Keen that used it: its pad animation (16 frames at each
+  end, the same tiles on the same frames as in the original) does not stop the other
+  players. The ship's parts screen opens only for the player who pressed, over the map, and
+  closes on his next button press; his Keen stands still while it is open.
+- F1 (help) and F3 (key setup) work only on the world map: they pause everybody, and the
+  others see "PLAYER 1 IS READING HELP" until the screen closes. In a level they do nothing.
+  F2 toggles the sound of the player who pressed it.
+
+How the events travel: votes and pauses are one-frame event bits (`EV_*` in `game.h`) in the
+per-frame input, recorded in replays like key presses. The local client decides when to emit
+them (R held for 0.5 s, the Esc menu), so the game itself applies them identically
+everywhere.
+
 ## Controls
 
 | Key | Action |
@@ -269,10 +348,11 @@ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy KEEN_SCRIPT=tests/scripts/two-player
 | Ctrl + Alt | fire the raygun |
 | Space | status screen |
 | F1 help, F2 sound, F3 redefine keys, F5 save (on the world map) | |
-| Esc | quit |
+| Esc | quit (co-op: menu with the return-to-map vote) |
+| R held for half a second | co-op: vote to restart the level |
 | Alt + Enter | toggle fullscreen |
 
-The original cheats work too: C+T+Space gives items, G+O+D toggles god mode.
+The original cheats work too: C+T+Space gives items, G+O+D toggles god mode (not in co-op).
 
 ## Repository layout
 

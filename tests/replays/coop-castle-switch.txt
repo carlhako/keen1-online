@@ -1,0 +1,15 @@
+# Co-op: player 1 pulls the castle switch (a switch tile and the castle marker tile are put in
+# the level by the test, as the shareware levels have none; the warp is a test aid). Both
+# screens shake and show the message, and 80 frames later the level ends for everybody.
+players 2
+coop 1
+seed 81
+level 1
+0 1 8 0 0
+0 2 8 0 0
+tile 9 10 8 0x10f
+tile 9 13 13 0x1df
+warp 10 1 10 8
+11 1 8 0 1
+12 1 8 0 0
+end 300

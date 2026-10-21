@@ -1,0 +1,29 @@
+# Co-op world map: the level-start handshake. Player 1 stands on level 4's entrance and presses
+# (a request), walks off (the request is cancelled), comes back and presses again, then player 2
+# presses on level 2's entrance (the request is replaced by player 2's), and finally player 1
+# joins player 2 there and presses: level 2 starts for both. The warps are test aids.
+players 2
+coop 1
+map
+warp 0 1 24 25
+0 1 8 0 0
+0 2 8 0 0
+10 1 8 1 0
+11 1 8 0 0
+20 1 8 0 0
+warp 20 1 24 22
+30 1 8 1 0
+31 1 8 0 0
+warp 30 1 24 25
+32 1 8 1 0
+33 1 8 0 0
+warp 40 2 24 30
+42 2 8 1 0
+43 2 8 0 0
+warp 50 1 24 30
+52 1 8 1 0
+53 1 8 0 0
+end 200
+seed 5
+level 2
+end 5

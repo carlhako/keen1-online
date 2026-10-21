@@ -71,7 +71,8 @@ static void usage(void)
          "  --scale N     window size multiplier (default 3)\n"
          "  --level N     play level N directly (like KEEN1 /LEVELnn)\n"
          "  --seed N      random seed (default: from the clock)\n"
-         "  --local2      two players in one window; player 2 uses Q W E / A D / Z S C, V jump, B pogo\n"
+         "  --local2      two co-op players in one window; player 2 uses Q W E / A D / Z S C, V jump, B pogo\n"
+         "  --coop        co-op rules with one player (a partner can join later online)\n"
          "  --record F    write the inputs of this game to a replay file\n"
          "  --replay F    run a replay file headless (no window, no sound, as fast as possible)\n"
          "  --checksums F write one state checksum per frame to F\n"
@@ -85,7 +86,7 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     const char *datadir = NULL, *replay = NULL, *checksums = NULL, *record = NULL;
-    int fullscreen = 0, scale = 3, selftest = 0, local2 = 0, have_seed = 0;
+    int fullscreen = 0, scale = 3, selftest = 0, local2 = 0, coop1 = 0, have_seed = 0;
     uint32_t seed = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--data") && i + 1 < argc)
@@ -103,6 +104,8 @@ int main(int argc, char **argv)
             sim_dump_at_exit();
         else if (!strcmp(argv[i], "--local2"))
             local2 = 1;
+        else if (!strcmp(argv[i], "--coop"))
+            coop1 = 1;
         else if (!strcmp(argv[i], "--record") && i + 1 < argc)
             record = argv[++i];
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc)
@@ -141,6 +144,8 @@ int main(int argc, char **argv)
         players[0].input = IN_KEYS1;
         players[1].input = IN_KEYS2;
     }
+    if (local2 || coop1)
+        game.coop = 1;
     game_seed = have_seed ? seed : (uint32_t)time(NULL);
 
     if (!exe_load()) {

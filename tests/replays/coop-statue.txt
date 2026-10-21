@@ -1,0 +1,10 @@
+# Co-op level 2: player 1 touches the Yorp statue (the warp is a test aid). Its message becomes
+# a banner for both players while player 2 keeps walking right.
+players 2
+coop 1
+seed 95
+level 2
+0 1 8 0 0
+0 2 2 0 0
+warp 10 1 7 5
+end 60

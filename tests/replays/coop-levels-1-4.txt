@@ -1,0 +1,74 @@
+# Recorded from a windowed --local2 run of tests/scripts/coop-levels-1-4.txt: a new game from the
+# title screen, then levels 1 to 4, each started with the map handshake and finished with both
+# Keens at the exit (the warps are test aids that the recording keeps).
+players 2
+coop 1
+gameseed 7
+map
+0 1 8 0 0
+0 2 8 0 0
+warp 23 1 21 39
+warp 23 2 21 39
+27 1 8 1 0
+30 1 8 0 0
+35 2 8 1 0
+end 36
+seed 2654435768
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 61 1 113 8
+warp 66 2 113 8
+end 95
+map
+0 1 8 0 0
+0 2 8 0 0
+warp 79 1 24 30
+warp 79 2 24 30
+83 1 8 1 0
+86 1 8 0 0
+91 2 8 1 0
+end 92
+seed 1013904233
+level 2
+0 1 8 0 0
+0 2 8 0 0
+warp 61 1 17 5
+warp 66 2 17 5
+end 95
+map
+0 1 8 0 0
+0 2 8 0 0
+warp 79 1 11 23
+warp 79 2 11 23
+83 1 8 1 0
+86 1 8 0 0
+91 2 8 1 0
+end 92
+seed 3668339994
+level 3
+0 1 8 0 0
+0 2 8 0 0
+warp 61 1 73 10
+warp 66 2 73 10
+end 95
+map
+0 1 8 0 0
+0 2 8 0 0
+warp 79 1 24 25
+warp 79 2 24 25
+83 1 8 1 0
+86 1 8 0 0
+91 2 8 1 0
+end 92
+seed 2027808459
+level 4
+0 1 8 0 0
+0 2 8 0 0
+warp 61 1 114 6
+warp 66 2 114 6
+end 95
+map
+0 1 8 0 0
+0 2 8 0 0
+end 78

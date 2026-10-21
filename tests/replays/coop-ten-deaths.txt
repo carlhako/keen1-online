@@ -1,0 +1,79 @@
+# Co-op level 1: both players fall out of the level ten times in a row. Every time the level
+# restarts at once and the game goes on (no lives); the eleventh start is stopped after 20 frames.
+players 2
+coop 1
+seed 100
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 101
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 102
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 103
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 104
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 105
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 106
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 107
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 108
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 109
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 5 2 5 120
+end 900
+seed 110
+level 1
+0 1 8 0 0
+0 2 8 0 0
+end 20

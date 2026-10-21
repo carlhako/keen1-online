@@ -185,13 +185,18 @@ void read_player_ctrl(int p)
     switch (players[p].input) {
     case IN_KEYS1:
         read_keys(&players[p].ctrl, key_dir, key_b1, key_b2);
+        players[p].ctrl.ev = 0;
         break;
     case IN_KEYS2:
         read_keys(&players[p].ctrl, key2_dir, key2_b1, key2_b2);
+        players[p].ctrl.ev = 0;
         break;
     case IN_REPLAY:
         break;
     }
+    /* Local overlays and votes shape a keyboard player's input (ui.c). */
+    if (game.coop && players[p].input != IN_REPLAY)
+        ui_filter_ctrl(p, &players[p].ctrl);
 }
 
 /* ------------------------------------------------------------------ */
@@ -460,7 +465,7 @@ static int obj_offscreen(void)
 void add_score(int pts)
 {
     gs.score += pts;
-    if (gs.score - last_extra >= 20000) {
+    if (!game.coop && gs.score - last_extra >= 20000) {
         snd_play(0x1c);
         last_extra = gs.score / 20000 * 20000;
         gs.lives++;
@@ -926,7 +931,10 @@ void keen_exit_walk(void)
     rf_tile((tx + 1) << 12, (ty + 1) << 12, 0x8f);
     if ((tx << 12) <= cur.x) {
         cur.type = 0;
-        level_result = 1;
+        if (game.coop)
+            plr->status = PS_EXITED;        /* the level goes on for the others */
+        else
+            level_result = 1;
     }
 }
 
@@ -942,8 +950,10 @@ void keen_dying(void)
     cur.sprite = 0x16 + ((gtick >> 4) & 1);
     cur.dx = cur.xv * tics;
     cur.dy = cur.yv * tics;
-    if (cur.y2 < scroll_y)
+    if (cur.y2 < plr->cam_y) {          /* off the top of his own view */
         cur.type = 0;
+        plr->status = PS_DEAD;
+    }
 }
 
 /* 0x468D: Keen touching another object */
@@ -1094,6 +1104,15 @@ static void lights(int on)
 static void switch_activate(void)
 {
     snd_play(0x19);
+    if (tile_at(plr->switch_x + 3, plr->switch_y + 5) == 0x1df && game.coop) {
+        /* Co-op: a timer in the game state shakes everybody's screen (see
+         * draw_camera) under a banner, then the level ends. */
+        if (!game.shake) {
+            game.shake = 80;
+            banner_add(BN_CASTLE);
+        }
+        return;
+    }
     if (tile_at(plr->switch_x + 3, plr->switch_y + 5) == 0x1df) {
         /* The switch in the castle shakes the screen and ends the level. */
         int32_t sx = scroll_x, sy = scroll_y;
@@ -1229,7 +1248,10 @@ static void keen_tiles(int i)
                 set_tile(tx, ty, 0x8f);
                 break;
             case 22:
-                statue_message();
+                if (game.coop)
+                    banner_add(BN_STATUE);
+                else
+                    statue_message();
                 set_tile(tx, ty, cur_level == 11 ? 0x1b2 : 0x13b);
                 break;
             case 23: case 25: case 26:
@@ -1304,11 +1326,30 @@ void camera_start(int i)
     p->cam_ty = p->cam_y >> 12;
 }
 
-/* The camera that gets drawn is the local player's. */
-static void draw_camera(void)
+/* The camera that gets drawn is the local player's. While the castle switch
+ * shakes the screen the picture jitters; the jitter comes from a generator of
+ * its own so it never touches the game's random numbers. */
+static uint32_t jitter_state = 1;
+
+static int jitter(void)
+{
+    static int off = -1;                /* KEEN_NOJITTER: test aid, draws without shaking */
+    if (off < 0)
+        off = getenv("KEEN_NOJITTER") != NULL;
+    if (off)
+        return 0;
+    jitter_state = jitter_state * 1664525u + 1013904223u;
+    return (int)(jitter_state >> 24) % 0x40 - 0x20;
+}
+
+void draw_camera(void)
 {
     scroll_x = players[local_player].cam_x;
     scroll_y = players[local_player].cam_y;
+    if (game.shake) {
+        scroll_x -= jitter() << 8;
+        scroll_y -= jitter() << 8;
+    }
 }
 
 static int play_level_run(int num)
@@ -1320,9 +1361,11 @@ static int play_level_run(int num)
         kx[i] = objs[i].x;
         ky[i] = objs[i].y;
     }
-    rf_hook = NULL;
+    rf_hook = game.coop ? ui_overlay_hook : NULL;
     memset(objs, 0, sizeof objs);
     memset(specs, 0, sizeof specs);
+    if (game.coop)
+        coop_level_begin();
     for (int i = 0; i < nplayers; i++) {
         obj_t *k = &objs[i];
         k->x = kx[i];
@@ -1334,7 +1377,7 @@ static int play_level_run(int num)
         k->active = 1;
         players[i].facing = 1;
         players[i].invuln = 0;
-        players[i].ctrl = players[i].ctrl_prev = (ctrl_t){8, 0, 0};
+        players[i].ctrl = players[i].ctrl_prev = (ctrl_t){8, 0, 0, 0};
     }
     numobjs = nplayers;
     numspecs = 0;
@@ -1352,6 +1395,26 @@ static int play_level_run(int num)
         camera_start(i);
     draw_camera();
 
+    /* Test aid for writing replays: KEEN_FIND=<behaviour> lists where those tiles are. */
+    if (replaying && getenv("KEEN_FIND")) {
+        const char *arg = getenv("KEEN_FIND");
+        if (arg[0] == 'l') {                /* "l23": the tile numbers that have behaviour 23 */
+            printf("tile numbers with behaviour %d:", atoi(arg + 1));
+            for (int t = 0; t < 700; t++)
+                if (T_BEHAV(t) == atoi(arg + 1))
+                    printf(" 0x%x", t);
+            printf("\n");
+        }
+        int tile = arg[0] == 't';           /* "t0x1df": that tile number instead */
+        int want = (int)strtol(tile ? arg + 1 : arg, NULL, 0);
+        printf("level %d: tiles with %s %d at:", num, tile ? "number" : "behaviour", want);
+        for (int ty = 0; ty < map_h; ty++)
+            for (int tx = 0; tx < map_w; tx++)
+                if ((tile ? MAPT(tx, ty) : T_BEHAV(MAPT(tx, ty))) == want)
+                    printf(" %d,%d", tx, ty);
+        printf("\n");
+    }
+
     frame_start();
     if (!warp_level)
         fade_out();
@@ -1364,9 +1427,13 @@ static int play_level_run(int num)
         frame_start();
         if (replaying)
             replay_apply();
+        else
+            sim_apply_script_warps();
         for (int i = 0; i < nplayers; i++)
             read_player_ctrl(i);
         record_frame();
+        if (game.coop)
+            coop_events(1);
         for (int i = 0; i < numobjs; i++) {
             obj_t *o = &objs[i];
             if (!o->type)
@@ -1402,6 +1469,8 @@ static int play_level_run(int num)
         }
         for (int i = 0; i < nplayers; i++)
             scroll_follow(i);
+        if (game.coop)
+            coop_follow_cameras();
         for (int i = 0; i < numobjs; i++) {
             obj_t *a = &objs[i];
             if (!a->type || !a->active)
@@ -1427,29 +1496,43 @@ static int play_level_run(int num)
         for (int i = 0; i < numspecs; i++)
             if (specs[i].active)
                 specs[i].think(&specs[i]);
+        if (game.coop)
+            coop_tick();
         frame_refresh();
         for (int i = 0; i < nplayers; i++)
             players[i].ctrl_prev = players[i].ctrl;
         frame_no++;
         replay_frame_end();
         if (!replaying) {
-            check_cheats();
-            if (check_hotkeys())
-                reset_frame_time();
+            if (game.coop) {
+                ui_poll_coop();
+            } else {
+                check_cheats();
+                if (check_hotkeys())
+                    reset_frame_time();
+            }
         }
         if (abort_game)
             return 0;
-        int alive = 0;
-        for (int i = 0; i < nplayers; i++)
-            alive |= objs[i].type != 0;
-        if (replaying && replay_level_done())
-            return 3;
-        if (level_result || !alive) {
+        int res;
+        if (game.coop) {
+            res = coop_level_eval();
+        } else {
+            int alive = 0;
+            for (int i = 0; i < nplayers; i++)
+                alive |= objs[i].type != 0;
+            res = level_result || !alive ? level_result : -1;
+        }
+        if (res < 0 && replaying && replay_level_done())
+            return LR_STOPPED;
+        if (res >= 0) {
             snd_wait();
             fade_out();
+            if (game.coop && (res == LR_FAIL || res == LR_VOTE_LEAVE))
+                coop_rollback();
             for (int k = 0; k < 4; k++)
                 gs.keys[k] = 0;
-            if (level_result == 0) {
+            if (res == LR_DIED) {
                 if (num == 8)
                     gs.vacuum = 0;
                 else if (num == 3)
@@ -1459,7 +1542,8 @@ static int play_level_run(int num)
                 else if (num == 16)
                     gs.whiskey = 0;
             }
-            return level_result;
+            rf_hook = NULL;
+            return res;
         }
     }
 }
@@ -1473,6 +1557,8 @@ extern int level_seed_set;
 int play_level(int num)
 {
     static uint32_t levels_started;
+    if (replaying && replay_is_flow() && !replay_next_segment(0, num))
+        return LR_STOPPED;
     uint32_t seed = level_seed_set ? level_seed_override
                                    : game_seed + 0x9e3779b1u * ++levels_started;
     rng_seed(seed);

@@ -1,0 +1,14 @@
+# Single player, not co-op: start level 1 from the map, fall out of the level (the warp is a
+# test aid), lose a life and come back to the map.
+players 1
+map
+warp 0 1 21 39
+0 1 8 0 0
+5 1 8 1 0
+6 1 8 0 0
+seed 3
+level 1
+warp 5 1 5 120
+end 400
+map
+end 3

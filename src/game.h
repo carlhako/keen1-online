@@ -65,16 +65,27 @@ typedef struct {
 
 extern gamestate_t gs;
 
-/* Controls (DS:79C2): direction 0..7 clockwise from up, 8 = none. */
+/* Controls (DS:79C2): direction 0..7 clockwise from up, 8 = none. `ev` holds
+ * one-frame events that travel with the input (votes, pauses), not held keys. */
 typedef struct {
     int16_t dir, b1, b2;
+    int16_t ev;
 } ctrl_t;
+
+enum {
+    EV_RESTART_TOGGLE = 1,      /* vote to restart the level, or withdraw the vote */
+    EV_MAP_TOGGLE = 2,          /* vote to return to the world map, or withdraw it */
+    EV_PAUSE_ON = 4,            /* this player opened help or key setup on the map */
+    EV_PAUSE_OFF = 8,           /* ...and closed it again */
+};
 
 /* One player. Keens occupy object slots 0..nplayers-1 (slot i is player i),
  * so "Keen thinks first and is drawn on top" still holds. Everything here
  * except `input` is game state: it goes into snapshots and checksums. */
 #define MAXPLAYERS 4
 enum { IN_KEYS1, IN_KEYS2, IN_REPLAY };    /* where a player's input comes from */
+enum { PS_ALIVE, PS_DEAD, PS_EXITED };     /* a player's status in a co-op level */
+enum { TP_NONE, TP_FROM, TP_TO, TP_WAIT }; /* world-map teleport: leaving, arriving, buttons up */
 typedef struct {
     int32_t facing;                 /* was keen_facing */
     int32_t invuln;                 /* was keen_invuln */
@@ -83,6 +94,10 @@ typedef struct {
     int32_t cam_tx, cam_ty;         /* camera in tiles, as seen by the last frame */
     int32_t map_x, map_y;           /* world map position */
     int32_t on_switch, switch_x, switch_y;
+    int32_t status;                 /* PS_*, in a co-op level */
+    int32_t tele, tele_t;           /* TP_* and the frame counter of the phase */
+    int32_t tele_tx, tele_ty, tele_flag;    /* tile and animation set being played */
+    int32_t tele_x, tele_y, tele_dflag;     /* where the Keen arrives, and its animation set */
     int32_t input;                  /* IN_*; not part of the game state */
 } player_t;
 
@@ -91,7 +106,51 @@ extern int nplayers;
 extern int local_player;            /* whose camera is drawn */
 extern player_t *cur_plr;           /* the player whose Keen is thinking */
 extern uint32_t gtick;              /* game time in ticks; replaces the wall clock */
-extern uint32_t frame_no;           /* simulated frames since the level started */
+extern uint32_t frame_no;           /* simulated frames since the level (or map) started */
+
+/* Co-op rules (coop.c). Everything here is game state: snapshots and checksums
+ * include it. */
+#define MAXBANNERS 4
+enum { BN_NONE, BN_STATUE, BN_CASTLE };     /* timed banners; vote and request banners are derived */
+typedef struct {
+    int32_t kind, frames;
+} banner_t;
+
+typedef struct {
+    int32_t coop;                   /* co-op rules on: set by the lobby, --local2 and --coop */
+    int32_t restart_votes;          /* bit per player */
+    int32_t map_votes;              /* bit per player: return to the world map */
+    int32_t pause_mask;             /* bit per player holding help or key setup open */
+    int32_t req_by;                 /* world-map start request: requesting player, -1 none */
+    int32_t req_level;
+    int32_t req_mask;               /* players who confirmed it */
+    int32_t entry_x, entry_y;       /* where Keens appear on the map after a level */
+    int32_t shake;                  /* castle switch: frames left until the level ends */
+    banner_t banner[MAXBANNERS];
+    gamestate_t start_gs;           /* the shared record when the level started */
+} game_t;
+extern game_t game;
+
+#define BANNER_FRAMES 120               /* about five seconds */
+void coop_level_begin(void);
+void coop_rollback(void);
+void coop_map_begin(void);
+void coop_events(int in_level);
+void banner_add(int kind);
+void coop_tick(void);
+int coop_level_eval(void);              /* LR_* or -1 */
+void coop_follow_cameras(void);
+
+/* How play_level ends. */
+enum {
+    LR_DIED,            /* non-co-op: Keen died */
+    LR_DONE,            /* exit door */
+    LR_TELEPORT,        /* in-level teleporter */
+    LR_CASTLE,          /* castle switch */
+    LR_FAIL,            /* co-op: every player dead, or all voted to restart */
+    LR_VOTE_LEAVE,      /* co-op: all voted to return to the map */
+    LR_STOPPED,         /* replay: the recorded frames are used up */
+};
 
 /* Engine state */
 extern int tics;
@@ -122,6 +181,7 @@ void rng_seed(uint32_t seed);
 obj_t *nearest_keen(void);                          /* nearest living Keen to cur */
 int player_of(const obj_t *o);                      /* player number of a Keen object, or -1 */
 void camera_start(int p);                           /* centre player p's camera on his Keen */
+void map_camera_center(int p);                      /* the same on the world map (menus.c) */
 void draw_keen(int32_t x, int32_t y, int sprite, int slot);
 int cam_sees(int tx, int ty, int l, int t, int r, int b);
 int tile_at(int tx, int ty);
@@ -146,6 +206,7 @@ void think_splash(void);
 void think_dying(void);
 void think_dead(void);
 int check_hotkeys(void);
+void draw_camera(void);                             /* the local player's camera, to the renderer */
 void check_cheats(void);
 
 /* Think/touch/special function ids, so snapshots do not hold pointers (sim.c). */
@@ -163,13 +224,22 @@ uint32_t sim_checksum(void);
 extern int replaying;                               /* running from a recording */
 int replay_load(const char *path);
 void replay_apply(void);                            /* set this frame's inputs */
+void sim_apply_script_warps(void);                  /* live runs: warps queued by KEEN_SCRIPT */
 int replay_level_done(void);                        /* recorded frames used up */
+int replay_is_coop(void);
+int replay_is_flow(void);                           /* the replay drives play_game (map and levels) */
+int replay_players(void);
+int replay_first_level(void);
+int replay_next_segment(int is_map, int level);     /* co-op replay: the next map or level */
+void replay_report(int level, int r);
 int checksums_open(const char *path);
 int replay_run(int selftest);
 void replay_frame_end(void);                        /* per-frame hook: checksum, selftest */
 void record_open(const char *path, int level);
 void record_level_begin(int level, uint32_t seed);
 void record_level_end(void);
+void record_map_begin(void);
+void record_map_end(void);
 extern uint32_t game_seed;
 void record_frame(void);
 void record_close(void);
@@ -201,6 +271,13 @@ void fade_in(void);
 void fade_out(void);
 void set_palette_black(void);
 void status_screen(void);
+void ui_filter_ctrl(int p, ctrl_t *c);              /* co-op: local overlays, votes, queued events */
+void ui_emit(int p, int events);                    /* queue one-frame events for player p's next input */
+int ui_poll_coop(void);                             /* co-op hotkeys; returns F1/F3 on the map, else 0 */
+void ui_run_screen(int scan);                       /* the blocking help or key-setup screen */
+void ship_paint(int ctrl_type);                     /* the ship parts window */
+void ui_open_ship(int p);                           /* the ship parts overlay, for the player who pressed */
+void ui_overlay_hook(void);                         /* draws banners and overlays over the playfield */
 void help_screen(void);
 void quit_menu(void);
 void statue_message(void);

@@ -1,0 +1,19 @@
+# Co-op: both start level 13 from the map. Player 1 walks onto the in-level teleporter (the
+# warp is a test aid), which ends the level for everyone: both Keens arrive on the dark side of
+# Mars at the landing spot, each with its own pad animation.
+players 2
+coop 1
+map
+warp 0 1 46 26
+warp 0 2 46 26
+30 1 8 1 0
+30 2 8 1 0
+31 1 8 0 0
+31 2 8 0 0
+seed 71
+level 13
+0 1 8 0 0
+0 2 8 0 0
+warp 20 1 124 71
+map
+end 40

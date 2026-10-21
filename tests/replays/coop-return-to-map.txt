@@ -1,0 +1,40 @@
+# Co-op: both start level 1 from the map (the warps are test aids). Player 1 walks into the exit and
+# player 2 follows (success): level 1 is done and both Keens are back on the map at the entrance.
+# Then both start level 2 and leave it by vote: both are back at its entrance, and the level is
+# not done.
+players 2
+coop 1
+map
+warp 0 1 21 39
+warp 0 2 21 39
+0 1 8 0 0
+0 2 8 0 0
+10 1 8 1 0
+10 2 8 1 0
+11 1 8 0 0
+11 2 8 0 0
+seed 7
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 113 8
+warp 8 2 113 8
+end 300
+map
+warp 0 1 24 30
+warp 0 2 24 30
+0 1 8 0 0
+0 2 8 0 0
+5 1 8 1 0
+5 2 8 1 0
+6 1 8 0 0
+6 2 8 0 0
+seed 8
+level 2
+0 1 8 0 0
+0 2 8 0 0
+5 1 8 0 0 2
+6 2 8 0 0 2
+end 100
+map
+end 8

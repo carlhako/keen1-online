@@ -1,0 +1,12 @@
+# A co-op game with one player: the restart vote of the only player restarts at once.
+players 1
+coop 1
+seed 61
+level 1
+0 1 2 0 0
+10 1 2 0 0 1
+end 200
+seed 62
+level 1
+0 1 8 0 0
+end 20

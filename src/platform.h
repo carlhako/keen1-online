@@ -21,6 +21,7 @@ void plat_shutdown(void);
 void plat_set_palette(const uint8_t regs[17]);
 void plat_set_border(int v);
 void plat_present(void);
+void plat_screenshot(const char *path);            /* test aid: the screen to a PNG */
 
 /* The original reprograms the PIT to 1193182/8192 Hz. */
 #define TICK_HZ (1193182.0 / 8192.0)

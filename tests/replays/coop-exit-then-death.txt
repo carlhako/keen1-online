@@ -1,0 +1,12 @@
+# Co-op level 1. Player 1 walks into the exit door (the warp is a test aid) while player 2 is
+# alive, so player 1 is exited and the level goes on. Then player 2 falls out of the level:
+# nobody is alive and somebody exited, so the level succeeds.
+players 2
+coop 1
+seed 21
+level 1
+0 1 2 0 0
+0 2 8 0 0
+warp 100 1 113 8
+warp 200 2 5 120
+end 900

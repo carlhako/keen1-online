@@ -1,0 +1,11 @@
+# Co-op level 1. Player 1 falls out of the level and is dead while player 2 plays on. Then
+# player 2 walks into the exit door: the level succeeds.
+players 2
+coop 1
+seed 22
+level 1
+0 1 8 0 0
+0 2 2 0 0
+warp 5 1 5 120
+warp 150 2 113 8
+end 900

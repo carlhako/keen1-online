@@ -1,0 +1,24 @@
+# Co-op level 1 votes. First segment, restart: player 1 votes and withdraws, player 2 votes
+# alone (nothing happens), then player 1 votes again and the level restarts. Second segment,
+# return to the map: player 1 votes and withdraws, player 2 votes alone, then player 1 votes
+# again and the level is left (not completed).
+players 2
+coop 1
+seed 51
+level 1
+0 1 8 0 0
+0 2 8 0 0
+10 1 8 0 0 1
+20 1 8 0 0 1
+30 2 8 0 0 1
+40 1 8 0 0 1
+end 200
+seed 52
+level 1
+0 1 8 0 0
+0 2 8 0 0
+10 1 8 0 0 2
+20 1 8 0 0 2
+30 2 8 0 0 2
+50 1 8 0 0 2
+end 200

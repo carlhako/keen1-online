@@ -1,0 +1,26 @@
+# Co-op events: both players on the map; player 1 opens help (pause on and off), then both
+# press jump on level 1's entrance and the level starts. In the level, votes are cast,
+# withdrawn, and finally both vote to return to the map.
+players 2
+coop 1
+map
+warp 0 1 21 39
+warp 0 2 21 39
+0 1 8 0 0
+0 2 8 0 0
+10 1 8 0 0 4
+20 1 8 0 0 8
+30 1 8 1 0
+30 2 8 1 0
+31 1 8 0 0
+31 2 8 0 0
+seed 11
+level 1
+0 1 8 0 0
+0 2 8 0 0
+10 1 8 0 0 1
+15 2 8 0 0 2
+20 1 8 0 0 1
+40 1 8 0 0 2
+map
+end 5

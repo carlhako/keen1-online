@@ -1,0 +1,18 @@
+# Co-op level 3. Player 1 collects the battery (the warp is a test aid), then both players fall
+# out of the level. The level fails and restarts: the battery is back in the level and the
+# score and ship parts are what they were when the level first started.
+players 2
+coop 1
+seed 31
+level 3
+0 1 8 0 0
+0 2 8 0 0
+warp 10 1 70 11
+warp 60 1 5 120
+warp 60 2 5 120
+end 900
+seed 32
+level 3
+0 1 8 0 0
+0 2 8 0 0
+end 5

@@ -238,7 +238,9 @@ void plat_set_ticks(uint32_t t)
 
 /* ------------------------------------------------------------------ */
 /* Debug scripting: KEEN_SCRIPT=file with lines "<frame> down|up <scancode> [player]",
- * "<frame> shot <file.png>", "<frame> quit". Frames count presents.
+ * "<frame> shot <file.png>", "<frame> warp <player> <tx> <ty>" (a test aid: puts that
+ * player's Keen on the tile at the start of the next frame, and is recorded as a `warp`
+ * line so the recording replays the same), "<frame> quit". Frames count presents.
  * With a player number, the scancode names a key of player 1's key set and
  * is translated to the same key of that player's set (so a script written for
  * player 1 also drives player 2). */
@@ -343,6 +345,14 @@ static void write_png(const char *path)
     free(z);
 }
 
+/* Test aid: the screen as it stands now, to a PNG (also in a headless replay). */
+void plat_screenshot(const char *path)
+{
+    write_png(path);
+}
+
+extern void sim_script_warp(int player, int tx, int ty);
+
 static void script_step(void)
 {
     if (!script)
@@ -363,7 +373,7 @@ static void script_step(void)
         }
         if (next_frame > script_frame)
             return;
-        int sc, pl = 0;
+        int sc, pl = 0, wy = 0;
         char arg[256];
         if (sscanf(next_cmd, "down %x %d", &sc, &pl) >= 1) {
             int k = script_key(sc, pl);
@@ -373,6 +383,8 @@ static void script_step(void)
             keydown[script_key(sc, pl)] = 0;
         } else if (sscanf(next_cmd, "key %x %255s", &sc, arg) == 2) {
             push_key((uint16_t)((sc & 0x7f) << 8 | (uint8_t)arg[0]));
+        } else if (sscanf(next_cmd, "warp %d %d %d", &pl, &sc, &wy) == 3) {
+            sim_script_warp(pl, sc, wy);
         } else if (sscanf(next_cmd, "shot %255s", arg) == 1) {
             write_png(arg);
         } else if (strncmp(next_cmd, "quit", 4) == 0) {

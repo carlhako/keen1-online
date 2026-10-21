@@ -1,6 +1,7 @@
 /* Text windows, prompts, status screen, text viewer, function keys
  * (KEEN1.EXE 0x082B..0x129D, 0x6118..0x67AE, 0xA17D..0xB7C8). */
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,11 +214,9 @@ int input_line(char *buf, int max)
 /* ------------------------------------------------------------------ */
 /* 0x0E76: status screen (space bar). */
 
-void status_screen(void)
+/* The contents of the status window, which is already open at cur_x/cur_y. */
+static void status_paint(void)
 {
-    uint32_t saved = plat_ticks();
-    flush_input();
-    win_grow(0x1c, 0xd);
     int y0 = cur_y, x0 = cur_x;
     char num[16];
     print_hi(ds_str(0x1e16));
@@ -266,6 +265,31 @@ void status_screen(void)
     print(num);
     if (gs.pogo)
         draw_tile_at(x0 + 0xb, (y0 + 8) * 8 + 4, 0x19f);
+    if (game.coop) {
+        /* A co-op game has no lives and no extra Keen: blank the "Extra Keen at"
+         * score and the "Keens" row. */
+        for (int x = x0 + 0xb; x <= x0 + 0x1a; x++) {
+            draw_char(x, y0 * 8, ' ');
+            draw_char(x, (y0 + 1) * 8, ' ');
+        }
+        for (int x = x0; x < x0 + 0xf; x++)
+            for (int y = y0 + 2; y <= y0 + 5; y++)
+                draw_char(x, y * 8, ' ');
+        /* It stays open, over the running game, until Space or a button */
+        for (int x = x0; x < x0 + 0x1c; x++)
+            draw_char(x, (y0 + 0xc) * 8, ' ' + 0x80);
+        cur_x = x0 + 4;
+        cur_y = y0 + 0xc;
+        print_hi("SPACE OR JUMP TO CLOSE");
+    }
+}
+
+void status_screen(void)
+{
+    uint32_t saved = plat_ticks();
+    flush_input();
+    win_grow(0x1c, 0xd);
+    status_paint();
     flush_input();
     key_get();
     flush_input();
@@ -273,23 +297,24 @@ void status_screen(void)
 }
 
 /* 0x255F: messages from the Yorp statues. */
+static const struct { int level; unsigned off[7]; } statue_msgs[] = {
+    {2, {0x1ff4, 0x200a, 0x2020, 0x2036, 0x204c, 0x2062, 0x2078}},
+    {6, {0x208e, 0x20a4, 0x20ba, 0x20d0, 0x20e6, 0x20fc, 0x2112}},
+    {9, {0x2128, 0x213e, 0x2154, 0x216a, 0x2180, 0x2196, 0x21ac}},
+    {10, {0x21c2, 0x21d8, 0x21ee, 0x2204, 0x221a, 0x2230, 0x2246}},
+    {11, {0x225c, 0x2272, 0x2288, 0x229e, 0, 0, 0}},
+    {12, {0x22b4, 0x22ca, 0x22e0, 0x22f6, 0x230d, 0x2323, 0x2339}},
+    {15, {0x234f, 0x2365, 0x237b, 0x2391, 0x23a7, 0x23bd, 0}},
+};
+
 void statue_message(void)
 {
     uint32_t saved = plat_ticks();
-    static const struct { int level; unsigned off[7]; } msgs[] = {
-        {2, {0x1ff4, 0x200a, 0x2020, 0x2036, 0x204c, 0x2062, 0x2078}},
-        {6, {0x208e, 0x20a4, 0x20ba, 0x20d0, 0x20e6, 0x20fc, 0x2112}},
-        {9, {0x2128, 0x213e, 0x2154, 0x216a, 0x2180, 0x2196, 0x21ac}},
-        {10, {0x21c2, 0x21d8, 0x21ee, 0x2204, 0x221a, 0x2230, 0x2246}},
-        {11, {0x225c, 0x2272, 0x2288, 0x229e, 0, 0, 0}},
-        {12, {0x22b4, 0x22ca, 0x22e0, 0x22f6, 0x230d, 0x2323, 0x2339}},
-        {15, {0x234f, 0x2365, 0x237b, 0x2391, 0x23a7, 0x23bd, 0}},
-    };
     win_center(0x15, 10);
-    for (size_t i = 0; i < sizeof msgs / sizeof msgs[0]; i++)
-        if (msgs[i].level == cur_level)
-            for (int l = 0; l < 7 && msgs[i].off[l]; l++)
-                print(ds_str(msgs[i].off[l]));
+    for (size_t i = 0; i < sizeof statue_msgs / sizeof statue_msgs[0]; i++)
+        if (statue_msgs[i].level == cur_level)
+            for (int l = 0; l < 7 && statue_msgs[i].off[l]; l++)
+                print(ds_str(statue_msgs[i].off[l]));
     cur_y = win_cy + 5;
     print_centered(ds_str(0x23d3));
     flush_input();
@@ -628,4 +653,342 @@ void help_screen(void)
     text_viewer(txt_help, 1, 0x14);
     scroll_x = sx;
     scroll_y = sy;
+}
+
+/* ------------------------------------------------------------------ */
+/* Co-op: banners and per-player overlays (openspec change coop-game-rules).
+ *
+ * Banners are drawn from the game state, so every player sees the same ones
+ * at the same time; they never pause the game. Overlays (status, ship, the Esc
+ * menu) are local: the game goes on, and while one is open the player's input
+ * is neutral so the Keen stands still. */
+
+enum { OV_NONE, OV_STATUS, OV_SHIP, OV_ESC };
+static int ov_kind;                     /* the local overlay that is open */
+static int ov_closing;                  /* closed, input stays neutral until the buttons are up */
+static int ov_prev_btn, ov_prev_space;  /* last frame's state, for press edges */
+static int space_prev;                  /* Space last frame, for opening the status overlay */
+static int pending_ev[MAXPLAYERS];      /* events queued by the UI for the next input */
+static int restart_hold[MAXPLAYERS];    /* frames the restart key has been held */
+
+#define RESTART_HOLD_FRAMES 12          /* half a second */
+
+void ui_emit(int p, int events)
+{
+    if (p >= 0 && p < MAXPLAYERS)
+        pending_ev[p] |= events;
+}
+
+void ui_open_ship(int p)
+{
+    if (p != local_player || players[p].input == IN_REPLAY || ov_kind || ov_closing)
+        return;
+    ov_kind = OV_SHIP;
+    ov_prev_btn = ov_prev_space = 1;
+    snd_play(0x14);
+}
+
+static void ov_open(int kind)
+{
+    ov_kind = kind;
+    ov_prev_btn = 1;
+    ov_prev_space = 1;
+}
+
+static void ov_close(void)
+{
+    ov_kind = OV_NONE;
+    ov_closing = 1;
+}
+
+/* The local player's input while an overlay is open: the overlay takes the
+ * keys, the game gets nothing. `c` holds the real keys on entry. */
+static void overlay_input(ctrl_t *c)
+{
+    int btn = c->b1 || c->b2, space = keydown[0x39] != 0;
+    if (ov_kind) {
+        int k = key_peek();
+        int btn_edge = btn && !ov_prev_btn, space_edge = space && !ov_prev_space;
+        switch (ov_kind) {
+        case OV_STATUS:
+            if (btn_edge || space_edge || (k >> 8) == 0x01)
+                ov_close();
+            break;
+        case OV_SHIP:
+            if (btn_edge || space_edge || (k >> 8) == 0x01)
+                ov_close();
+            break;
+        case OV_ESC:
+            if (k) {
+                int ch = toupper(k & 0xff);
+                if (ch == 'M' && !in_world_map)
+                    ui_emit(local_player, EV_MAP_TOGGLE);
+                else if (ch == 'T')
+                    abort_game = 1;
+                ov_close();
+            }
+            break;
+        }
+        while (key_peek())
+            key_get();
+    }
+    ov_prev_btn = btn;
+    ov_prev_space = space;
+    if (ov_closing && !btn && !space)
+        ov_closing = 0;
+    *c = (ctrl_t){8, 0, 0, 0};
+}
+
+void ui_filter_ctrl(int p, ctrl_t *c)
+{
+    if (p == local_player && (ov_kind || ov_closing))
+        overlay_input(c);
+    /* Holding the restart key for half a second votes (and again withdraws). */
+    int key = players[p].input == IN_KEYS2 ? 0x15 : 0x13;        /* Y for player 2, else R */
+    if (!in_world_map && !ov_kind && keydown[key]) {
+        if (++restart_hold[p] == RESTART_HOLD_FRAMES)
+            c->ev |= EV_RESTART_TOGGLE;
+    } else {
+        restart_hold[p] = 0;
+    }
+    c->ev |= pending_ev[p];
+    pending_ev[p] = 0;
+}
+
+/* Local hotkeys after each frame. Space opens the status overlay and Esc the
+ * menu overlay; F2 toggles this player's sound. F1 and F3 work on the world
+ * map only: the caller gets the key and brackets the screen with pause
+ * events. Returns that key, or 0. */
+int ui_poll_coop(void)
+{
+    int space = keydown[0x39] != 0;
+    int open_status = space && !space_prev && !ov_kind && !ov_closing;
+    space_prev = space;
+    if (ov_kind || ov_closing)
+        return 0;
+    if (open_status) {
+        ov_open(OV_STATUS);
+        return 0;
+    }
+    int scan = key_peek() >> 8;
+    switch (scan) {
+    case 0x01:
+        key_get();
+        flush_input();
+        ov_open(OV_ESC);
+        return 0;
+    case 0x3c:
+        key_get();
+        snd_enabled ^= 1;
+        return 0;
+    case 0x3b:
+    case 0x3d:
+        key_get();
+        return in_world_map ? scan : 0;
+    case 0x3f:
+        check_hotkeys();
+        return 0;
+    }
+    return 0;
+}
+
+/* The blocking help or key-setup screen, on the world map. */
+void ui_run_screen(int scan)
+{
+    uint32_t saved = plat_ticks();
+    snd_stop();
+    flush_input();
+    if (scan == 0x3b)
+        help_screen();
+    else
+        controls_menu();
+    rf_hook = ui_overlay_hook;
+    plat_set_ticks(saved);
+    flush_input();
+}
+
+/* The ship parts window (the ship on the world map), over a window of its own. */
+void ship_paint(int ctrl_type)
+{
+    win_center(0x14, 8);
+    print(ds_str(0x3487));
+    print(ds_str(0x34ae));
+    print(ds_str(0x34c0));
+    print(ds_str(ctrl_type == 0 ? 0x34cc : 0x34d1));
+    if (!gs.joystick) draw_tile_at(margin_x + 3, (cur_y - 4) * 8, 0x141);
+    if (!gs.battery) draw_tile_at(margin_x + 7, (cur_y - 4) * 8, 0x142);
+    if (!gs.vacuum) draw_tile_at(margin_x + 0xb, (cur_y - 4) * 8, 0x143);
+    if (!gs.whiskey) draw_tile_at(margin_x + 0xf, (cur_y - 4) * 8, 0x144);
+}
+
+/* --- drawing --- */
+
+static int bit_first(int mask)
+{
+    for (int p = 0; p < MAXPLAYERS; p++)
+        if (mask & (1 << p))
+            return p;
+    return -1;
+}
+
+/* "PLAYER 2 WANTS TO RESTART" / "PLAYERS 1 2 WANT TO RESTART" */
+static void vote_text(char *out, size_t n, int mask, const char *what)
+{
+    int count = 0;
+    for (int p = 0; p < MAXPLAYERS; p++)
+        count += (mask >> p) & 1;
+    char who[24] = "";
+    for (int p = 0; p < MAXPLAYERS; p++)
+        if (mask & (1 << p))
+            snprintf(who + strlen(who), sizeof who - strlen(who), count > 1 && *who ? " %d" : "%d", p + 1);
+    snprintf(out, n, count > 1 ? "PLAYERS %s WANT TO %s" : "PLAYER %s WANTS TO %s", who, what);
+}
+
+/* One line on a bar across the top of the screen, row `row` (8 pixels each). */
+static void strip(int row, const char *text)
+{
+    int w = (int)strlen(text) + 2, x1 = 24 - w / 2;
+    for (int x = 0; x < w; x++)
+        draw_char(x1 + x, row * 8, ' ' + 0x80);
+    cur_x = x1 + 1;
+    cur_y = row;
+    print_hi(text);
+}
+
+/* A framed message, its bottom edge at the bottom of the screen. */
+static void message_box(const char (*lines)[40], int n)
+{
+    int w = 0;
+    for (int i = 0; i < n; i++)
+        if ((int)strlen(lines[i]) > w)
+            w = (int)strlen(lines[i]);
+    w += 2;
+    int x1 = 24 - (w + 2) / 2, y1 = 24 - (n + 1);
+    win_open(x1, y1, x1 + w + 1, y1 + n + 1);
+    for (int i = 0; i < n; i++) {
+        cur_x = x1 + 2;
+        cur_y = y1 + 1 + i;
+        print(lines[i]);
+    }
+}
+
+static int statue_lines(char (*lines)[40])
+{
+    int n = 0;
+    for (size_t i = 0; i < sizeof statue_msgs / sizeof statue_msgs[0]; i++)
+        if (statue_msgs[i].level == cur_level)
+            for (int l = 0; l < 7 && statue_msgs[i].off[l]; l++) {
+                snprintf(lines[n], 40, "%s", ds_str(statue_msgs[i].off[l]));
+                lines[n][strcspn(lines[n], "\r\n")] = 0;
+                n++;
+            }
+    return n;
+}
+
+/* An arrow at the edge of the screen pointing to a Keen that is off screen. */
+static void edge_arrow(int32_t wx, int32_t wy)
+{
+    float tx = (float)(wx - scroll_x) / 256 + 8, ty = (float)(wy - scroll_y) / 256 + 8;
+    if (tx >= 0 && tx < SCR_W && ty >= 0 && ty < SCR_H)
+        return;
+    float cx = SCR_W / 2.0f, cy = SCR_H / 2.0f, dx = tx - cx, dy = ty - cy;
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 1)
+        return;
+    dx /= len;
+    dy /= len;
+    /* from the centre along (dx, dy) to the screen edge, inset a little */
+    float t = 1e9f;
+    if (dx > 0) t = fminf(t, (SCR_W - 14 - cx) / dx);
+    if (dx < 0) t = fminf(t, (14 - cx) / dx);
+    if (dy > 0) t = fminf(t, (SCR_H - 14 - cy) / dy);
+    if (dy < 0) t = fminf(t, (14 - cy) / dy);
+    float px = cx + dx * t, py = cy + dy * t;
+    for (int y = -14; y <= 14; y++)
+        for (int x = -14; x <= 14; x++) {
+            /* the point in arrow coordinates: u along the arrow, v across it */
+            float u = x * dx + y * dy, v = -x * dy + y * dx;
+            int in = u >= -8 && u <= 8 && fabsf(v) <= (8 - u) * 0.6f;
+            int edge = u >= -9 && u <= 9 && fabsf(v) <= (9 - u) * 0.6f + 1;
+            int sx = (int)(px + x), sy = (int)(py + y);
+            if (sx < 0 || sx >= SCR_W || sy < 0 || sy >= SCR_H)
+                continue;
+            if (in)
+                screen[sy * SCR_W + sx] = 14;
+            else if (edge)
+                screen[sy * SCR_W + sx] = 0;
+        }
+}
+
+void ui_overlay_hook(void)
+{
+    /* Windows sit on the 8 pixel text grid, not on the scrolled picture. */
+    int32_t sx = scroll_x, sy = scroll_y;
+    scroll_x &= ~0xfff;
+    scroll_y &= ~0xfff;
+    char text[64];
+    int row = 0;
+    if (game.pause_mask) {
+        snprintf(text, sizeof text, "PLAYER %d IS READING HELP", bit_first(game.pause_mask) + 1);
+        strip(row++, text);
+    }
+    if (game.restart_votes) {
+        vote_text(text, sizeof text, game.restart_votes, "RESTART");
+        strip(row++, text);
+    }
+    if (game.map_votes) {
+        vote_text(text, sizeof text, game.map_votes, "RETURN TO THE MAP");
+        strip(row++, text);
+    }
+    if (game.req_by >= 0) {
+        snprintf(text, sizeof text, "PLAYER %d WANTS TO PLAY LEVEL %d", game.req_by + 1,
+                 game.req_level);
+        strip(row++, text);
+    }
+    for (int i = 0; i < MAXBANNERS; i++) {
+        char lines[8][40];
+        int n = 0;
+        if (game.banner[i].kind == BN_STATUE) {
+            n = statue_lines(lines);
+        } else if (game.banner[i].kind == BN_CASTLE) {
+            snprintf(lines[0], 40, "%s", ds_str(0x2408));
+            lines[0][strcspn(lines[0], "\r\n")] = 0;
+            n = 1;
+        }
+        if (n)
+            message_box((const char (*)[40])lines, n);
+    }
+    switch (ov_kind) {
+    case OV_STATUS:
+        win_center(0x1c, 0xd);
+        status_paint();
+        break;
+    case OV_SHIP:
+        ship_paint(0);
+        break;
+    case OV_ESC: {
+        char lines[4][40];
+        int n = 0;
+        if (!in_world_map)
+            snprintf(lines[n++], 40, "M  %s", (game.map_votes >> local_player) & 1
+                                                  ? "WITHDRAW VOTE TO LEAVE" : "VOTE TO RETURN TO MAP");
+        snprintf(lines[n++], 40, "T  QUIT TO TITLE");
+        snprintf(lines[n++], 40, "ESC  KEEP PLAYING");
+        int w = 0;
+        for (int i = 0; i < n; i++)
+            if ((int)strlen(lines[i]) > w)
+                w = (int)strlen(lines[i]);
+        win_center(w + 2, n);
+        for (int i = 0; i < n; i++) {
+            cur_x = margin_x + 1;
+            cur_y = win_cy - n / 2 + i;
+            print(lines[i]);
+        }
+        break;
+    }
+    }
+    scroll_x = sx;
+    scroll_y = sy;
+    if (game.req_by >= 0 && game.req_by != local_player && in_world_map)
+        edge_arrow(objs[game.req_by].x, objs[game.req_by].y);
 }

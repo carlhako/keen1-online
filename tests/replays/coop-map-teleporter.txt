@@ -1,0 +1,20 @@
+# Co-op world map: player 1 uses the teleporter at tile 36,5 (the warp is a test aid) while
+# player 2 keeps walking, right and left, the whole time. Only player 1's Keen moves to the
+# destination; its pad animation (about 32 frames) does not stop player 2.
+players 2
+coop 1
+map
+0 1 8 0 0
+0 2 2 0 0
+8 2 6 0 0
+16 2 2 0 0
+24 2 6 0 0
+32 2 2 0 0
+40 2 6 0 0
+48 2 2 0 0
+56 2 6 0 0
+64 2 2 0 0
+72 2 6 0 0
+warp 5 1 36 5
+5 1 8 1 0
+end 80
