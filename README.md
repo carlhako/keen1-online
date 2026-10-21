@@ -1,4 +1,16 @@
-# keen-clone: Commander Keen 1 for Linux (SDL2)
+# keen1-online: Commander Keen 1, online co-op
+
+keen1-online is a fork of [keen-clone](https://github.com/carlhako/keen-clone), the
+native C/SDL2 port of Commander Keen 1 (Marooned on Mars). It starts from keen-clone's
+web build and adds deterministic lockstep simulation, up to two Keens in one level, and
+(in later changes) online co-op play in the browser. keen-clone stays the faithful
+single-player port: see it for the reverse-engineering notes (`analysis/`) and the tools
+that produced them (`tools/`), which are kept here for reference.
+
+Build the browser version with `make web` (see [Web port](#web-port)). The rest of this
+README is inherited from keen-clone and describes the port itself.
+
+## About the port
 
 A native C/SDL2 reimplementation of *Commander Keen in Invasion of the Vorticons,
 Episode One: Marooned on Mars* (id Software / Apogee, 1990). It was rebuilt from the
