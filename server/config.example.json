@@ -1,0 +1,8 @@
+{
+  "port": 8080,
+  "maxGames": 5,
+  "inputLeadMax": 6,
+  "disconnectSec": 15,
+  "emptyGameSec": 60,
+  "checkpointFrames": 240
+}

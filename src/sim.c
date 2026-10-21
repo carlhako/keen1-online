@@ -136,6 +136,8 @@ static void save_ctrl(const ctrl_t *c)
 static void save_game(void)
 {
     p32((uint32_t)game.coop);
+    p32((uint32_t)game.present);
+    p32((uint32_t)game.levels_started);
     p32((uint32_t)game.restart_votes);
     p32((uint32_t)game.map_votes);
     p32((uint32_t)game.pause_mask);
@@ -161,6 +163,7 @@ static void serialise(void)
     p32((uint32_t)map_h);
     p32((uint32_t)cur_level);
     p32((uint32_t)nplayers);
+    p32((uint32_t)in_world_map);
     p32((uint32_t)numobjs);
     p32((uint32_t)numspecs);
     p32(gtick);
@@ -316,6 +319,8 @@ static void load_ctrl(rd_t *r, ctrl_t *c)
 static void load_game(rd_t *r)
 {
     game.coop = (int32_t)r32(r);
+    game.present = (int32_t)r32(r);
+    game.levels_started = (int32_t)r32(r);
     game.restart_votes = (int32_t)r32(r);
     game.map_votes = (int32_t)r32(r);
     game.pause_mask = (int32_t)r32(r);
@@ -332,6 +337,20 @@ static void load_game(rd_t *r)
     rcopy(r, &game.start_gs, sizeof game.start_gs);
 }
 
+/* The kind of segment a snapshot was taken in: the world map, or a level. */
+int sim_snapshot_kind(const uint8_t *buf, size_t len, int *in_map, int *level)
+{
+    rd_t r = {buf, buf + len, 0};
+    if (r32(&r) != SNAP_MAGIC)
+        return 0;
+    r32(&r);
+    r32(&r);
+    *level = (int)r32(&r);
+    r32(&r);
+    *in_map = (int)r32(&r);
+    return !r.bad;
+}
+
 /* Restores a snapshot taken from the same level. Returns 1 on success. */
 int sim_restore(const uint8_t *buf, size_t len)
 {
@@ -340,9 +359,10 @@ int sim_restore(const uint8_t *buf, size_t len)
         return 0;
     int mw = (int)r32(&r), mh = (int)r32(&r);
     int lvl = (int)r32(&r);
-    int np = (int)r32(&r), no = (int)r32(&r), ns = (int)r32(&r);
+    int np = (int)r32(&r), wm = (int)r32(&r), no = (int)r32(&r), ns = (int)r32(&r);
     if (np != nplayers || no < 0 || no > MAXOBJS || ns < 0 || ns > MAXSPECS || mw < 1 || mh < 1)
         return 0;
+    in_world_map = wm;
     map_w = mw;
     map_h = mh;
     cur_level = lvl;
@@ -734,6 +754,24 @@ void sim_script_warp(int player, int tx, int ty)
 {
     if (n_script_warps < 16 && player >= 1 && player <= nplayers)
         script_warps[n_script_warps++] = (typeof(script_warps[0])){player - 1, tx, ty};
+}
+
+/* Test aid: put player p's Keen on tile tx,ty now (in a level or on the map). */
+void sim_warp(int p, int tx, int ty)
+{
+    if (p < 0 || p >= nplayers || !objs[p].type)
+        return;
+    obj_t *k = &objs[p];
+    k->x = (int32_t)tx << 12;
+    k->y = (int32_t)ty << 12;
+    k->xv = k->yv = 0;
+    if (in_world_map) {
+        players[p].map_x = k->x;
+        players[p].map_y = k->y;
+        map_camera_center(p);
+    } else {
+        camera_start(p);
+    }
 }
 
 /* Start of a live frame: the queued warps (a replay does it in replay_apply). */

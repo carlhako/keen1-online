@@ -83,8 +83,8 @@ enum {
  * so "Keen thinks first and is drawn on top" still holds. Everything here
  * except `input` is game state: it goes into snapshots and checksums. */
 #define MAXPLAYERS 4
-enum { IN_KEYS1, IN_KEYS2, IN_REPLAY };    /* where a player's input comes from */
-enum { PS_ALIVE, PS_DEAD, PS_EXITED };     /* a player's status in a co-op level */
+enum { IN_KEYS1, IN_KEYS2, IN_REPLAY, IN_NET }; /* where a player's input comes from */
+enum { PS_ALIVE, PS_DEAD, PS_EXITED, PS_ABSENT }; /* a player's status in a co-op level; absent: nobody in that seat */
 enum { TP_NONE, TP_FROM, TP_TO, TP_WAIT }; /* world-map teleport: leaving, arriving, buttons up */
 typedef struct {
     int32_t facing;                 /* was keen_facing */
@@ -118,6 +118,8 @@ typedef struct {
 
 typedef struct {
     int32_t coop;                   /* co-op rules on: set by the lobby, --local2 and --coop */
+    int32_t present;                /* bit per player whose Keen is in the game (online: a seat can be empty) */
+    int32_t levels_started;         /* levels begun in this game; seeds each level's random generator */
     int32_t restart_votes;          /* bit per player */
     int32_t map_votes;              /* bit per player: return to the world map */
     int32_t pause_mask;             /* bit per player holding help or key setup open */
@@ -130,6 +132,7 @@ typedef struct {
     gamestate_t start_gs;           /* the shared record when the level started */
 } game_t;
 extern game_t game;
+#define PRESENT(p) ((game.present >> (p)) & 1)
 
 #define BANNER_FRAMES 120               /* about five seconds */
 void coop_level_begin(void);
@@ -140,6 +143,8 @@ void banner_add(int kind);
 void coop_tick(void);
 int coop_level_eval(void);              /* LR_* or -1 */
 void coop_follow_cameras(void);
+void coop_add_player(int seat);         /* online: a player joins; the Keen appears on top of another */
+void coop_remove_player(int seat);      /* online: a player's Keen leaves the game */
 
 /* How play_level ends. */
 enum {
@@ -150,6 +155,7 @@ enum {
     LR_FAIL,            /* co-op: every player dead, or all voted to restart */
     LR_VOTE_LEAVE,      /* co-op: all voted to return to the map */
     LR_STOPPED,         /* replay: the recorded frames are used up */
+    LR_RESTORE,         /* online: a snapshot arrived; play_game restarts the segment from it */
 };
 
 /* Engine state */
@@ -246,6 +252,23 @@ void record_close(void);
 extern int headless_delay_ms;
 void sim_dump_at_exit(void);
 
+/* net.c: online play. The game runs the frames a server seals, with everybody's inputs. */
+extern int net_online;                  /* --online: the lobby started this game */
+extern int net_seat;                    /* this machine's player */
+extern uint32_t net_frame;              /* the next frame to simulate, counted across map and levels */
+int net_log_option(const char *opt, const char *arg);   /* --netlog and friends (native tests) */
+int net_have_backend(void);
+int net_boot(void);                     /* read how the game starts; sets players, seed, who is present */
+int net_resume(int *level);             /* 0 nothing to restore, 1 into the map, 2 into level *level */
+int net_restore_apply(void);            /* a segment is set up: load the waiting snapshot into it */
+void net_segment_begin(void);           /* a map phase or level starts: report, maybe checkpoint */
+int net_frame_begin(void);              /* top of a simulated frame; 1 = restart the segment from a snapshot */
+void net_event(int code);               /* 1 the ending starts, 2 the game finished, 3 leave */
+void net_local_screen(int on);          /* a blocking local screen is up: keep the input stream going */
+void net_idle_forever(void);
+void sim_warp(int p, int tx, int ty);        /* test aid: put a Keen on a tile */
+int sim_snapshot_kind(const uint8_t *buf, size_t len, int *in_map, int *level);
+
 /* actors.c */
 void spawn_actors(void);
 void yorp_look(void);
@@ -291,6 +314,7 @@ extern int key_get(void);
 /* menus.c */
 void title_loop(void);
 void game_setup(void);              /* start of a game: map position, scores */
+void game_new(void);                /* a new game's record: lives, ammo, no ship parts */
 void play_game(void);
 void save_game_prompt(void);
 int load_game_prompt(void);

@@ -59,15 +59,21 @@ WEB_OUT  := build/web
 WEB_FLAGS := -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -sUSE_SDL=2 \
 	-sASYNCIFY -sASYNCIFY_STACK_SIZE=65536 -sSTACK_SIZE=1MB -sALLOW_MEMORY_GROWTH \
 	-sINVOKE_RUN=0 -sEXIT_RUNTIME -sEXPORTED_RUNTIME_METHODS=callMain -lidbfs.js \
-	--pre-js web/pre.js --shell-file web/shell.html
+	--pre-js web/pre.js --pre-js web/net.js --shell-file web/shell.html
 
+# The build id (a hash of the wasm file) goes into the page and next to it as
+# build-id.txt, where the server reads it: a browser left open across an upgrade is
+# told to reload.
 web: $(WEB_OUT)/index.html
 
-$(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/shell.html $(wildcard $(WEB_DATA)/*)
+$(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/net.js web/shell.html $(wildcard $(WEB_DATA)/*)
 	@test -f $(WEB_DATA)/EGAHEAD.CK1 || { echo "No Keen 1 shareware data in $(WEB_DATA)" \
 		"(extract 1keen.zip with tools/unshr.py or set WEB_DATA=dir)"; exit 1; }
 	mkdir -p $(WEB_OUT)
 	$(EMCC) $(WEB_FLAGS) -o $@ $(SRC) --preload-file $(WEB_DATA)@/data
+	@id=$$(sha256sum $(WEB_OUT)/index.wasm | cut -c1-16); \
+	echo $$id > $(WEB_OUT)/build-id.txt; \
+	sed -i "s/@BUILD_ID@/$$id/" $(WEB_OUT)/index.html
 
 # Headless WebAssembly build for Node: runs replays (--replay) so their
 # checksums can be compared with the native build's. Real files via NODERAWFS.
@@ -82,12 +88,29 @@ $(NODE_OUT)/keen1.js: $(SRC) src/*.h
 	mkdir -p $(NODE_OUT)
 	$(EMCC) $(NODE_FLAGS) -o $@ $(SRC)
 
+# Headless WebAssembly build for Node that plays online through web/net.js (a test client for
+# tests/online): `make nodenet`, then see tests/online/README.md.
+NODENET_OUT := build/nodenet
+NODENET_FLAGS := $(NODE_FLAGS) -DKEEN_NODE_NET -sINVOKE_RUN=0 -sEXPORTED_RUNTIME_METHODS=callMain \
+	-sMODULARIZE -sEXPORT_NAME=createKeen --pre-js web/net.js
+
+nodenet: $(NODENET_OUT)/keen1.js
+
+$(NODENET_OUT)/keen1.js: $(SRC) src/*.h web/net.js
+	mkdir -p $(NODENET_OUT)
+	$(EMCC) $(NODENET_FLAGS) -o $@ $(SRC)
+
 # Determinism tests: snapshot/restore self-test, real-time independence and
 # (when the Node build exists) native-vs-wasm checksums. Needs shareware/data.
 test: keen1
 	tests/run.sh
 
+# End-to-end online tests: the real server and headless game clients (needs make nodenet and
+# `npm run build` in server/).
+test-online: nodenet
+	node --test tests/online/e2e.test.mjs
+
 clean:
 	rm -rf build keen1 $(DIST) $(DIST).tar.gz
 
-.PHONY: dist web node test clean
+.PHONY: dist web node nodenet test test-online clean

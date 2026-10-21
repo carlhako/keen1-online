@@ -73,6 +73,74 @@ cmp -s "$TMP/play.win.ck" "$TMP/play.head.ck" && grep -q "levels done: 1 2 3 4" 
     && ok "windowed co-op game through levels 1-4 == replay of its recording ($(wc -l < "$TMP/play.win.ck") frames)" \
     || bad "windowed co-op game and its replay differ"
 
+echo "online: playing the frames a server seals (--netlog)"
+# The same inputs through the online path give the same game as the replay they came from.
+python3 tools/replay2netlog.py tests/replays/coop-levels-1-4.txt "$TMP/levels.netlog" > /dev/null
+./keen1 --data "$DATA" --netlog "$TMP/levels.netlog" --checksums "$TMP/levels.net.ck" > /dev/null
+cmp -s "$TMP/coop-levels-1-4.fast" "$TMP/levels.net.ck" \
+    && ok "frame log of coop-levels-1-4 == the replay it came from ($(wc -l < "$TMP/levels.net.ck") frames)" \
+    || bad "frame log and replay of coop-levels-1-4 differ"
+# A browser that joins restores a checkpoint in a new process and must stay in step with the others.
+# join JOIN_FRAME FROM_FRAME: player 2 joins at JOIN_FRAME; a second process starts from the snapshot
+# of FROM_FRAME as player 2 and must produce the same checksums from there on.
+join() {
+    python3 tools/replay2netlog.py tests/replays/coop-levels-1-4.txt "$TMP/join.netlog" --solo-until "$1" > /dev/null
+    ./keen1 --data "$DATA" --netlog "$TMP/join.netlog" --seat 1 --checksums "$TMP/join.a.ck" \
+        --net-snapshot "$2:$TMP/join.snap" --netsums "$TMP/join.a.sums" > /dev/null
+    ./keen1 --data "$DATA" --netlog "$TMP/join.netlog" --seat 2 --net-restore "$TMP/join.snap" \
+        --checksums "$TMP/join.b.ck" --netsums "$TMP/join.b.sums" > /dev/null
+    tail -n +$(($2 + 1)) "$TMP/join.a.ck" | cmp -s - "$TMP/join.b.ck" \
+        && ok "$3 ($(wc -l < "$TMP/join.b.ck") frames)" || bad "$3: the joiner drifted"
+    awk -v f="$2" '$1 > f' "$TMP/join.b.sums" > "$TMP/join.b.sums.tail"
+    awk -v f="$2" '$1 > f' "$TMP/join.a.sums" | cmp -s - "$TMP/join.b.sums.tail" \
+        && ok "$3: the reported checksums agree" || bad "$3: reported checksums differ"
+}
+join 260 230 "player 2 joins in level 2 from a checkpoint in level 2 (restore into a level)"
+join 500 450 "player 2 joins on the map from a checkpoint on the map (restore into the map)"
+join 300 100 "player 2 joins from a checkpoint two segments earlier"
+python3 tools/replay2netlog.py tests/replays/coop-levels-1-4.txt "$TMP/leave.netlog" --remove 2@270 > /dev/null
+./keen1 --data "$DATA" --netlog "$TMP/leave.netlog" --checksums "$TMP/leave.ck" > "$TMP/out.txt" 2>&1
+grep -q "netlog: end at frame 770" "$TMP/out.txt" \
+    && ok "player 2 leaves in level 2: the game goes on for player 1 alone" || bad "leave: the game did not run on"
+
+# Continue single player after a partner left: the co-op end rules apply to who is left.
+# solo_log FILE REMOVE_FRAME WARP...: both start level 1 from the map; player 2 leaves at REMOVE_FRAME.
+solo_log() {
+    out=$1; at=$2; shift 2
+    python3 - "$out" "$at" "$@" <<'PY'
+import sys
+out, at, warps = sys.argv[1], int(sys.argv[2]), sys.argv[3:]
+lines = ["# keen1-online netlog (test)", "seed 7", "mask 3", "warp 0 1 21 39", "warp 0 2 21 39"] + warps
+for f in range(500):
+    b = 24 if f == 10 else 8          # both press jump on level 1's entrance
+    lines.append("%d %d %d%s" % (f, b, b, " remove:2" if f == at else ""))
+open(out, "w").write("\n".join(lines) + "\n")
+PY
+}
+loc_at() { awk -v f="$2" '$1 == f { print $3 }' "$1"; }
+solo_log "$TMP/alive.netlog" 100 "warp 150 1 113 8"
+./keen1 --data "$DATA" --netlog "$TMP/alive.netlog" --netsums "$TMP/alive.sums" > /dev/null
+[ "$(loc_at "$TMP/alive.sums" 120)" = 1 ] && [ "$(loc_at "$TMP/alive.sums" 192)" = 0 ] \
+    && ok "player 2 leaves, player 1 alive: the level goes on and player 1 finishes it" \
+    || bad "player 2 leaves, player 1 alive: the level did not go on"
+solo_log "$TMP/dead.netlog" 330 "warp 50 1 5 120"
+./keen1 --data "$DATA" --netlog "$TMP/dead.netlog" --netsums "$TMP/dead.sums" > /dev/null
+[ -n "$(loc_at "$TMP/dead.sums" 331)" ] && [ "$(loc_at "$TMP/dead.sums" 480)" = 1 ] \
+    && ok "player 2 leaves, player 1 dead: the level fails at once and restarts for player 1" \
+    || bad "player 2 leaves, player 1 dead: no restart"
+
+# The last level with all four ship parts: the ending plays, then the game tells the server it is done.
+python3 - "$TMP/ending.netlog" <<'PY'
+import sys
+lines = ["# keen1-online netlog (test)", "seed 7", "mask 3", "warp 0 1 21 39", "warp 0 2 21 39",
+         "parts 20 1111", "warp 100 1 113 8", "warp 104 2 113 8"]
+lines += ["%d %d %d" % (f, 24 if f == 10 else 8, 24 if f == 10 else 8) for f in range(700)]
+open(sys.argv[1], "w").write("\n".join(lines) + "\n")
+PY
+timeout 60 ./keen1 --data "$DATA" --netlog "$TMP/ending.netlog" > "$TMP/out.txt" 2>&1
+grep -q "the ending plays" "$TMP/out.txt" && grep -q "the game finished at frame .*levels done: 1" "$TMP/out.txt" \
+    && ok "all four ship parts: the ending plays and the game finishes" || bad "the ending did not play and finish"
+
 echo "native vs WebAssembly (Node)"
 if [ -f build/node/keen1.js ] && command -v node > /dev/null; then
     for r in tests/replays/*.txt; do
@@ -80,6 +148,10 @@ if [ -f build/node/keen1.js ] && command -v node > /dev/null; then
         node build/node/keen1.js --data "$DATA" --replay "$r" --checksums "$TMP/$n.wasm" > /dev/null
         cmp -s "$TMP/$n.fast" "$TMP/$n.wasm" && ok "$n: wasm == native" || bad "$n: wasm differs from native"
     done
+    node build/node/keen1.js --data "$DATA" --netlog "$TMP/levels.netlog" --checksums "$TMP/levels.net.wasm" > /dev/null
+    cmp -s "$TMP/levels.net.ck" "$TMP/levels.net.wasm" && ok "online frame log: wasm == native" || bad "online frame log: wasm differs from native"
+    node build/node/keen1.js --data "$DATA" --netlog "$TMP/join.netlog" --seat 2 --net-restore "$TMP/join.snap" --checksums "$TMP/join.wasm.ck" > /dev/null
+    cmp -s "$TMP/join.b.ck" "$TMP/join.wasm.ck" && ok "online join from a snapshot: wasm == native" || bad "online join from a snapshot: wasm differs from native"
 else
     echo "  skipped (run: source ~/tools/emsdk/emsdk_env.sh && make node)"
 fi

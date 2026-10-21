@@ -110,7 +110,9 @@ void rng_seed(uint32_t t)
 void frame_start(void)
 {
     rf_begin();
-    if (plat_headless()) {
+    if (plat_fast) {
+        /* online catch-up: no pacing, the game just runs */
+    } else if (plat_headless()) {
         /* Headless replay: no pacing, optionally a fixed delay to show that
          * results do not depend on real time. */
         if (headless_delay_ms > 0)
@@ -145,7 +147,7 @@ void reset_frame_time(void)
 /* Player 1's keys: W A S D also move, unless a second player needs them. */
 static int wasd_alias(void)
 {
-    return nplayers < 2;
+    return nplayers < 2 || net_online;
 }
 
 static void read_keys(ctrl_t *c, const uint8_t *dir, int b1, int b2)
@@ -192,10 +194,11 @@ void read_player_ctrl(int p)
         players[p].ctrl.ev = 0;
         break;
     case IN_REPLAY:
+    case IN_NET:
         break;
     }
     /* Local overlays and votes shape a keyboard player's input (ui.c). */
-    if (game.coop && players[p].input != IN_REPLAY)
+    if (game.coop && (players[p].input == IN_KEYS1 || players[p].input == IN_KEYS2))
         ui_filter_ctrl(p, &players[p].ctrl);
 }
 
@@ -1368,6 +1371,11 @@ static int play_level_run(int num)
         coop_level_begin();
     for (int i = 0; i < nplayers; i++) {
         obj_t *k = &objs[i];
+        players[i].facing = 1;
+        players[i].invuln = 0;
+        players[i].ctrl = players[i].ctrl_prev = (ctrl_t){8, 0, 0, 0};
+        if (!PRESENT(i))
+            continue;               /* nobody in this seat: no Keen */
         k->x = kx[i];
         k->y = ky[i];
         k->type = OT_KEEN;
@@ -1375,9 +1383,6 @@ static int play_level_run(int num)
         k->touch = keen_touch;
         k->sprite = 4;
         k->active = 1;
-        players[i].facing = 1;
-        players[i].invuln = 0;
-        players[i].ctrl = players[i].ctrl_prev = (ctrl_t){8, 0, 0, 0};
     }
     numobjs = nplayers;
     numspecs = 0;
@@ -1392,7 +1397,8 @@ static int play_level_run(int num)
     spawn_actors();
 
     for (int i = 0; i < nplayers; i++)
-        camera_start(i);
+        if (PRESENT(i))
+            camera_start(i);
     draw_camera();
 
     /* Test aid for writing replays: KEEN_FIND=<behaviour> lists where those tiles are. */
@@ -1423,7 +1429,14 @@ static int play_level_run(int num)
     frame_refresh();
     fade_in();
 
+    if (net_online) {
+        net_segment_begin();
+        net_restore_apply();        /* a joiner or a repaired browser continues from a snapshot */
+    }
+
     for (;;) {
+        if (net_online && net_frame_begin())
+            return LR_RESTORE;      /* a snapshot arrived: play_game starts this level from it */
         frame_start();
         if (replaying)
             replay_apply();
@@ -1468,7 +1481,8 @@ static int play_level_run(int num)
             *o = cur;
         }
         for (int i = 0; i < nplayers; i++)
-            scroll_follow(i);
+            if (objs[i].type)
+                scroll_follow(i);
         if (game.coop)
             coop_follow_cameras();
         for (int i = 0; i < numobjs; i++) {
@@ -1492,7 +1506,8 @@ static int play_level_run(int num)
             if (objs[i].type && objs[i].active)
                 draw_obj(&objs[i], i);
         for (int i = 0; i < nplayers; i++)
-            keen_tiles(i);
+            if (objs[i].type)
+                keen_tiles(i);
         for (int i = 0; i < numspecs; i++)
             if (specs[i].active)
                 specs[i].think(&specs[i]);
@@ -1556,11 +1571,11 @@ extern int level_seed_set;
 
 int play_level(int num)
 {
-    static uint32_t levels_started;
     if (replaying && replay_is_flow() && !replay_next_segment(0, num))
         return LR_STOPPED;
+    game.levels_started++;          /* part of the game state: a joiner must know it */
     uint32_t seed = level_seed_set ? level_seed_override
-                                   : game_seed + 0x9e3779b1u * ++levels_started;
+                                   : game_seed + 0x9e3779b1u * (uint32_t)game.levels_started;
     rng_seed(seed);
     record_level_begin(num, seed);
     int r = play_level_run(num);

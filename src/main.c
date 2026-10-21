@@ -63,6 +63,19 @@ static void find_data_dir(const char *opt)
     data_set_dir(".");
 }
 
+/* A frame log written by the server starts with a comment line that says so. */
+static int is_netlog(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    char line[64] = "";
+    if (f) {
+        if (!fgets(line, sizeof line, f))
+            line[0] = 0;
+        fclose(f);
+    }
+    return !strncmp(line, "# keen1-online netlog", 21);
+}
+
 static void usage(void)
 {
     puts("Usage: keen1 [--data DIR] [--fullscreen] [--scale N] [--level N]\n"
@@ -73,8 +86,14 @@ static void usage(void)
          "  --seed N      random seed (default: from the clock)\n"
          "  --local2      two co-op players in one window; player 2 uses Q W E / A D / Z S C, V jump, B pogo\n"
          "  --coop        co-op rules with one player (a partner can join later online)\n"
+         "  --online      the web lobby started this game: play the frames a server seals\n"
+         "  --bot         the same without a window or sound (test client, make nodenet)\n"
+         "  --netlog F    play the frame log F of an online game headless (--seat N picks whose view,\n"
+         "                --netsums F writes the checksums, --net-snapshot FRAME:FILE saves the state\n"
+         "                at that frame, --net-restore FILE starts from such a snapshot)\n"
          "  --record F    write the inputs of this game to a replay file\n"
-         "  --replay F    run a replay file headless (no window, no sound, as fast as possible)\n"
+         "  --replay F    run a replay file headless (no window, no sound, as fast as possible);\n"
+         "                a server frame log (KEEN_FRAMELOG) plays as an online game, see --netlog\n"
          "  --checksums F write one state checksum per frame to F\n"
          "  --frame-delay MS  sleep MS per frame in a headless replay (tests real-time independence)\n"
          "  --dump-objs   print the objects (type, position) when the game exits\n"
@@ -106,7 +125,18 @@ int main(int argc, char **argv)
             local2 = 1;
         else if (!strcmp(argv[i], "--coop"))
             coop1 = 1;
-        else if (!strcmp(argv[i], "--record") && i + 1 < argc)
+        else if (!strcmp(argv[i], "--online"))
+            net_online = 1;
+        else if (!strcmp(argv[i], "--bot"))
+            net_online = 3;             /* a test client: online without a window or sound */
+        else if ((!strcmp(argv[i], "--netlog") || !strcmp(argv[i], "--seat") ||
+                  !strcmp(argv[i], "--netsums") || !strcmp(argv[i], "--net-restore") ||
+                  !strcmp(argv[i], "--net-snapshot")) && i + 1 < argc) {
+            net_log_option(argv[i], argv[i + 1]);
+            if (!strcmp(argv[i], "--netlog"))
+                net_online = 2;         /* from a frame log: headless, no browser */
+            i++;
+        } else if (!strcmp(argv[i], "--record") && i + 1 < argc)
             record = argv[++i];
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc)
             replay = argv[++i];
@@ -134,11 +164,26 @@ int main(int argc, char **argv)
     if (warp_level < 0 || warp_level > 16)
         warp_level = 0;
     find_data_dir(datadir);
+    if (replay && is_netlog(replay)) {
+        /* the frame log of an online game: played through the same code the web page uses */
+        net_log_option("--netlog", replay);
+        net_online = 2;
+        replay = NULL;
+        selftest = 0;
+    }
     if (replay) {
         if (!replay_load(replay))
             return 1;
         plat_set_headless(headless_delay_ms > 0 ? 2 : 1);
     }
+    if (net_online == 2 || net_online == 3)
+        plat_set_headless(1);
+    if (net_online && !net_have_backend()) {
+        fprintf(stderr, "--online plays through the web page; use --netlog FILE to play a frame log here.\n");
+        return 1;
+    }
+    if (net_online == 3)
+        net_online = 1;
     if (local2) {
         nplayers = 2;
         players[0].input = IN_KEYS1;
@@ -167,6 +212,10 @@ int main(int argc, char **argv)
     load_scores();
     controls_load();
     palettes_init();
+    if (net_online) {
+        net_boot();             /* the seed, who plays and where the game starts come from the lobby */
+        game_new();
+    }
     rng_seed(game_seed);
     set_palette_black();
     plat_present();
@@ -178,6 +227,11 @@ int main(int argc, char **argv)
         int r = replay_run(selftest);
         plat_shutdown();
         return r;
+    }
+    if (net_online) {
+        play_game();
+        plat_shutdown();
+        return 0;
     }
 
     for (;;) {

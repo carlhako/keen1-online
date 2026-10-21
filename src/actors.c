@@ -569,9 +569,11 @@ void spec_bridge_retract(spec_t *s)
 static obj_t *nearest_keen_to(int32_t x)
 {
     obj_t *best = &objs[0];
-    for (int i = 1; i < nplayers; i++) {
+    for (int i = 0; i < nplayers; i++) {
+        if (!objs[i].type)
+            continue;
         int32_t d = objs[i].x > x ? objs[i].x - x : x - objs[i].x;
-        int32_t bd = best->x > x ? best->x - x : x - best->x;
+        int32_t bd = best->type ? (best->x > x ? best->x - x : x - best->x) : 0x7fffffff;
         if (d < bd)
             best = &objs[i];
     }

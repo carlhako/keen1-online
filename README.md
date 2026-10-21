@@ -58,7 +58,8 @@ the data from a game zip (`make dist GAMEZIP=/path/to/keen1.zip`) into
 
 The same code also runs in a web browser, compiled to WebAssembly with
 [Emscripten](https://emscripten.org). The web build bundles the free shareware
-episode, so the result is a self-contained folder you can serve from any web server.
+episode. Online co-op needs the keen1-online server in `server/`, which serves the page
+and relays the players' inputs (see [Playing online](#playing-online)).
 
 ### Building the web port
 
@@ -88,28 +89,28 @@ later builds take a few seconds. The output lands in `build/web/`:
 
 | File | Contents |
 |------|----------|
-| `index.html` | the page: start screen, game canvas, keyboard handling |
+| `index.html` | the page: lobby, game canvas, keyboard handling |
 | `index.js` | Emscripten runtime and loader |
 | `index.wasm` | the compiled game |
 | `index.data` | the packed shareware game files |
+| `build-id.txt` | a hash of `index.wasm`, also inside the page: the server refuses a page from another build |
 
 `make clean` removes it along with the native build.
 
 ### Running it locally
 
-Browsers won't load WebAssembly from a `file://` page, so serve the folder over HTTP:
+Start the server (it serves `build/web/` and the lobby's WebSocket on one port):
 
 ```
-python3 -m http.server 8137 --directory build/web
+cd server && npm install && npm run build && npm start
 ```
 
-Then open <http://localhost:8137>.
+Then open <http://localhost:8080> (in two browser windows, to play both sides yourself).
 
 ### Playing in the browser
 
-- Click the start screen, or press any key, once it says *Click or press a key to
-  start*. Browsers only allow sound after you interact with the page, so the game
-  waits for this.
+- The page opens on the lobby (see [Playing online](#playing-online)); choosing a game
+  starts it. Clicking in the lobby is also the gesture browsers need before they allow sound.
 - The keys are the same as the native version (see [Controls](#controls)). While the
   game runs, the page keeps keys for itself: arrows and Space don't scroll, Alt
   doesn't open a browser menu, F1/F3 don't open browser help or search, and F5
@@ -123,16 +124,15 @@ Then open <http://localhost:8137>.
   and survive reloads and restarts. They belong to that browser and that address:
   another browser, a private window, or a different host or port starts empty.
   Clearing the site's data in the browser settings resets them.
-- Quitting the game (Esc on the world map, then D) shows a *Thanks for playing* screen; *Play again*
-  reloads the page.
+- When the game stops (it crashed, or the connection to the server was lost) a *Thanks for
+  playing* screen is shown; *Play again* reloads the page, back to the lobby.
 
 ### Putting it on a website
 
-Copy the four files in `build/web/` to any static web host (a plain web server,
-GitHub Pages, Netlify and so on), all in the same folder. Nothing runs on the server.
-Serving `.wasm` files as `application/wasm` lets the browser compile while
-downloading; with another type it still works, just a little slower to start. The
-whole game is about 1.5 MB.
+The page is the lobby of an online game, so it needs the server in `server/` behind it:
+a static web host is not enough. Put a reverse proxy with TLS in front of the server and
+let it pass WebSocket upgrades on `/ws` (and keep idle connections open: the server pings
+every 10 seconds). The whole game is about 1.5 MB.
 
 ### How the web port works
 
@@ -144,6 +144,35 @@ The game files are preloaded read-only as `/data`; `/save` is an IndexedDB-backe
 directory that is loaded before the game starts and flushed after every write.
 The browser-specific code is behind `#ifdef __EMSCRIPTEN__` in `src/`; the page and
 storage setup are in `web/shell.html` and `web/pre.js`.
+
+## Playing online
+
+Open the page: the lobby lists the running games with how many of their 2 seats are filled
+and where they are (the world map or a level). The server runs at most 5 games at once.
+
+- **New game** starts a game with you as player 1 and shows *Waiting for player 2*. When
+  somebody joins, the game starts for both of you on the world map. **Play single player**
+  starts at once; the second seat stays open for anybody to join later.
+- **Join** takes the open seat of a game, whether it is waiting, being played by one
+  player, or paused. Your Keen appears on top of the other Keen, in the level or on the map,
+  and the game goes on without stopping. A game with 2 players has no Join button.
+- When the server is full, New game is disabled and says *Server full (5/5)*; **Retry** tries again. Joining games with an open seat still works.
+- If your partner's connection closes (or stops sending for 15 seconds), your game pauses
+  with *Player 2 disconnected* and **Continue single player**: their Keen goes, and the level
+  carries on under the co-op rules (if nobody is left alive, the level fails and restarts).
+  Anybody from the lobby can take the open seat; joining while you are paused resumes the game
+  with both of you.
+- A browser that closed or lost a game sees it marked **Rejoin** in the lobby while its seat
+  is open, and rejoining puts it back as the same player. A game nobody is in is kept for
+  60 seconds, listed as 0/2, and then removed.
+- If your partner's tab is hidden or busy, you see *Waiting for player 2* and the game goes
+  on by itself when their inputs arrive again (after 15 seconds they are dropped).
+- Esc opens the menu: **L** leaves the game (the lobby shows it, your seat opens), **M** votes
+  to return to the map, as in a local co-op game.
+- After the ending both of you are back at the lobby, and the game is removed.
+
+The details (messages, lockstep, checkpoints and how a joining or drifted browser catches
+up) are in [server/README.md](server/README.md).
 
 ## Deterministic simulation and replays
 
@@ -215,6 +244,25 @@ with tile number N, as an aid for writing `warp` lines.
 make test                  # needs shareware/data and ./keen1
 source ~/tools/emsdk/emsdk_env.sh && make node   # optional: the WebAssembly build for Node
 ```
+
+`tests/run.sh` also checks the online code natively: `--netlog FILE` plays the frame log of an
+online game headless (the server writes one per game with `KEEN_FRAMELOG=dir`, and
+`--replay` takes it too; `tools/replay2netlog.py` turns a co-op replay into one). It checks that a
+frame log gives the same game as the replay it came from, that a second player joining
+mid-game from a snapshot in a fresh process stays in step, and what happens to a level when a
+player leaves.
+
+`tests/online/` has the end-to-end tests: the real server and headless game clients (the Node
+build `make nodenet` with the same `web/net.js` the page uses) playing through real
+WebSockets, with a delay proxy for slow connections:
+
+```
+source ~/tools/emsdk/emsdk_env.sh && make nodenet && (cd server && npm install && npm run build)
+node --test tests/online/e2e.test.mjs
+```
+
+`tests/online/partner.mjs` is a bot that stays connected for manual testing, a second player
+for a real browser tab (see its header).
 
 `tests/run.sh` checks the snapshot/restore self-test (`--selftest FILE`: snapshot at
 frame 300, run to 600, restore, run again and compare every frame; also that a changed
@@ -356,11 +404,16 @@ The original cheats work too: C+T+Space gives items, G+O+D toggles god mode (not
 
 ## Repository layout
 
-- `web/` the browser page (`shell.html`) and IndexedDB glue (`pre.js`) for `make web`.
+- `web/` the browser page (`shell.html`: the lobby and game screen), IndexedDB glue (`pre.js`)
+  and the WebSocket bridge to the game (`net.js`) for `make web`.
+- `server/` the online server: lobby, input relay and checkpoints (Node 22, TypeScript); see its README.
+- `tests/` replays and scripts for the determinism tests (`run.sh`), `tests/online/` the end-to-end tests.
 - `src/` the port: `engine.c` (objects, collision, Keen), `actors.c` (enemies, doors,
   bridges), `menus.c` (title, map, ending, scores), `ui.c` (windows, text, status),
   `gfx.c` (LZW graphics), `kdata.c` (data from the EXE, version detection) and
-  `platform.c` (SDL2 video, keyboard, PC-speaker sound at the original 145.6 Hz).
+  `platform.c` (SDL2 video, keyboard, PC-speaker sound at the original 145.6 Hz), `sim.c`
+  (snapshots, checksums, replays), `coop.c` (co-op rules, players joining and leaving) and
+  `net.c` (online play: sealed frames, input lead, checkpoints and catch-up).
 - `analysis/` reverse engineering output: `NOTES.md` (file formats, addresses,
   findings), the Ghidra decompilation of all 388 functions (`keen1_decomp.c`, cleaned
   and annotated as `keen1_clean.c` / `keen1_annot.c`), the disassembly (`code.dis`),

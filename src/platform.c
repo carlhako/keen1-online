@@ -26,6 +26,9 @@ static int64_t virt_ticks;      /* headless clock, in 1/70 s steps scaled to tic
 static double virt_frac;
 
 void plat_set_headless(int on) { headless = on; }
+int plat_fast;
+void (*plat_idle_hook)(void);
+void plat_set_fast(int on) { plat_fast = on; }
 int plat_headless(void) { return headless; }
 
 static void virt_advance(double seconds)
@@ -226,6 +229,15 @@ void plat_delay(int ms)
 #endif
 }
 
+void plat_sleep(int ms)
+{
+#ifdef __EMSCRIPTEN__
+    emscripten_sleep((unsigned)ms);
+#else
+    SDL_Delay((uint32_t)ms);
+#endif
+}
+
 uint32_t plat_ticks(void)
 {
     return (uint32_t)(raw_ticks() + tick_adjust);
@@ -399,7 +411,7 @@ void plat_present(void)
 {
     uint32_t *pix;
     int pitch;
-    if (headless)
+    if (headless || plat_fast)
         return;
     script_step();
     if (SDL_LockTexture(tex, NULL, (void **)&pix, &pitch) == 0) {
@@ -420,6 +432,8 @@ void plat_present(void)
 
 void plat_vsync(int n)
 {
+    if (plat_fast)
+        return;
     if (headless) {
         virt_advance(n / 70.0);
         return;
@@ -428,6 +442,8 @@ void plat_vsync(int n)
     uint64_t period = perf_freq / 70;
     while (n-- > 0) {
         plat_pump();
+        if (plat_idle_hook)
+            plat_idle_hook();
         plat_present();
         uint64_t now = SDL_GetPerformanceCounter();
         if (last == 0 || now - last > period * 4)
@@ -513,7 +529,7 @@ void snd_load(const uint8_t *data, long len)
 
 void snd_play(int num)
 {
-    if (headless)
+    if (headless || plat_fast)
         return;
     if (!snd_data || num * 16 + 3 >= snd_len)
         return;

@@ -723,8 +723,10 @@ static void overlay_input(ctrl_t *c)
                 int ch = toupper(k & 0xff);
                 if (ch == 'M' && !in_world_map)
                     ui_emit(local_player, EV_MAP_TOGGLE);
-                else if (ch == 'T')
+                else if (ch == 'T' && !net_online)
                     abort_game = 1;
+                else if (ch == 'L' && net_online)
+                    net_event(3);           /* back to the lobby; the page reloads */
                 ov_close();
             }
             break;
@@ -972,7 +974,7 @@ void ui_overlay_hook(void)
         if (!in_world_map)
             snprintf(lines[n++], 40, "M  %s", (game.map_votes >> local_player) & 1
                                                   ? "WITHDRAW VOTE TO LEAVE" : "VOTE TO RETURN TO MAP");
-        snprintf(lines[n++], 40, "T  QUIT TO TITLE");
+        snprintf(lines[n++], 40, net_online ? "L  LEAVE GAME" : "T  QUIT TO TITLE");
         snprintf(lines[n++], 40, "ESC  KEEP PLAYING");
         int w = 0;
         for (int i = 0; i < n; i++)

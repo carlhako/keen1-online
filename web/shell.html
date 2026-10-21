@@ -70,26 +70,77 @@
   }
   button:focus-visible { outline: 2px solid #ffff55; outline-offset: 2px; }
   .fine { font-size: 12px; color: #5555ff; max-width: 40em; }
+  button:disabled { background: #5555ff; color: #aaaaaa; cursor: default; }
+  button.quiet { background: #aaaaaa; }
+  .row { display: flex; gap: 0.75em; flex-wrap: wrap; justify-content: center; }
+  #games { list-style: none; margin: 0; padding: 0; width: min(36em, 100%); max-height: 38%; overflow-y: auto; }
+  #games li {
+    display: flex; gap: 0.75em; align-items: center; justify-content: space-between;
+    padding: 0.15em 0.6em; font-size: clamp(11px, 1.9vw, 15px);
+  }
+  #games li:nth-child(odd) { background: #0000cc; }
+  #games .name { color: #55ff55; min-width: 5em; text-align: left; }
+  #games .where { flex: 1; text-align: left; color: #ffffff; }
+  #games .seats { color: #ffff55; }
+  #games li button { padding: 0 0.8em; }
+  #none { color: #5555ff; margin: 0; }
+  #msg { color: #ffffff; min-height: 1.5em; margin: 0; }
+  #msg.bad { color: #ff5555; }
+  #waiting h2 { margin: 0; color: #ffffff; font-size: clamp(14px, 3vw, 24px); }
+  /* Over the game: who the game waits for, and a disconnected partner. */
+  #status {
+    position: absolute; left: 50%; bottom: 3%; transform: translateX(-50%);
+    padding: 0.2em 1em; background: #aa0000; color: #fff; font-size: clamp(12px, 2vw, 16px);
+    pointer-events: none;
+  }
+  #status[hidden] { display: none; }
+  #paused { background: rgba(0, 0, 170, 0.92); }
 </style>
 </head>
 <body>
 <div id="screen">
   <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 
-  <div id="start" class="overlay">
-    <h1>Commander Keen<small>Episode One: Marooned on Mars</small></h1>
-    <div id="prompt">Loading…</div>
+  <div id="lobby" class="overlay">
+    <h1>Commander Keen<small>Episode One: Marooned on Mars &middot; online co-op</small></h1>
+    <p id="msg">Connecting&hellip;</p>
+    <div id="browse">
+      <ul id="games"></ul>
+      <p id="none" hidden>No games running. Start one!</p>
+      <div class="row">
+        <button id="new" type="button" disabled>New game</button>
+        <button id="retry" type="button" class="quiet" hidden>Retry</button>
+      </div>
+    </div>
+    <div id="waiting" hidden>
+      <h2>Waiting for player 2&hellip;</h2>
+      <div class="row">
+        <button id="single" type="button">Play single player</button>
+        <button id="cancel" type="button" class="quiet">Leave</button>
+      </div>
+    </div>
     <table>
       <tr><td>Arrows</td><td>move</td></tr>
       <tr><td>Ctrl</td><td>jump</td></tr>
       <tr><td>Alt</td><td>pogo stick</td></tr>
       <tr><td>Ctrl+Alt</td><td>fire raygun</td></tr>
       <tr><td>Space</td><td>status</td></tr>
-      <tr><td>F1 F2 F3</td><td>help, sound, keys</td></tr>
-      <tr><td>Esc</td><td>quit</td></tr>
+      <tr><td>Esc</td><td>menu</td></tr>
     </table>
-    <div class="fine">Shareware v1.31 · Saves and high scores stay in this browser.
-      Ctrl+W still closes the tab: redefine the keys with F3 if you like.</div>
+    <div class="fine">Shareware v1.31 &middot; Two players share one game. Ctrl+W still closes the tab:
+      redefine the keys with F3 on the world map if you like.</div>
+    <div id="loading" class="fine">Loading game data&hellip;</div>
+  </div>
+
+  <div id="status" hidden></div>
+
+  <div id="paused" class="overlay" hidden>
+    <h1 id="pausedmsg">Player 2 disconnected</h1>
+    <div class="row">
+      <button id="continue" type="button">Continue single player</button>
+      <button id="leave" type="button" class="quiet">Leave game</button>
+    </div>
+    <div class="fine">Somebody from the lobby can still take the open seat; the game goes on with both of you then.</div>
   </div>
 
   <div id="end" class="overlay" hidden>
@@ -100,38 +151,138 @@
 </div>
 
 <script>
+  // Filled in by `make web` (a hash of the wasm file); the server compares it in the handshake.
+  window.KEEN_BUILD_ID = '@BUILD_ID@';
   (function () {
-    var start = document.getElementById('start');
-    var prompt = document.getElementById('prompt');
+    var $ = function (id) { return document.getElementById(id); };
     var ready = false, running = false;
 
     window.Module = {
-      canvas: document.getElementById('canvas'),
+      canvas: $('canvas'),
       setStatus: function (text) {
-        if (!ready && text) prompt.textContent = text.replace(/\(\d+\/\d+\)/, '').trim() || 'Loading…';
+        if (!ready && text) $('loading').textContent = text.replace(/\(\d+\/\d+\)/, '').trim() || 'Loading game data\u2026';
       },
       onRuntimeInitialized: function () {
         ready = true;
-        start.classList.add('ready');
-        prompt.textContent = 'Click or press a key to start';
+        $('loading').hidden = true;
+        maybeStart();
       },
       onExit: function (code) { finish(code ? 'The game stopped with an error (' + code + ').' : null); },
       onAbort: function (what) { finish('The game crashed: ' + what); }
     };
 
-    // Browsers only allow audio after a user gesture, so main() waits for one.
-    function begin(e) {
-      if (!ready || running) return;
-      if (e) e.preventDefault();
-      running = true;
-      start.hidden = true;
-      Module.canvas.focus();
-      Module.callMain([]);
+    // ---- the lobby ----
+
+    var net = null;
+    function lobbyInit() {
+      net = Module.net;
+      net.onchange = render;
+      net.onboot = maybeStart;
+      net.onleave = function () {
+        if (running) location.reload();     // a fresh runtime for the next game
+        else render();
+      };
+      $('new').addEventListener('click', function () { net.create(); });
+      $('retry').addEventListener('click', function () { net.create(); });
+      $('single').addEventListener('click', function () { net.single(); });
+      $('cancel').addEventListener('click', function () { net.leave(); });
+      $('continue').addEventListener('click', function () { net.continueSolo(); });
+      $('leave').addEventListener('click', function () { net.leave(); });
+      net.connect();
+      render();
     }
-    start.addEventListener('click', begin);
-    window.addEventListener('keydown', function (e) {
-      if (!running && ready && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) begin(e);
-    });
+
+    function where(g) {
+      if (g.phase === 'waiting') return 'waiting for player 2';
+      var text = g.loc.kind === 'level' ? 'level ' + g.loc.level : 'world map';
+      if (g.phase === 'paused') text += ' (paused)';
+      if (g.phase === 'empty') text += ' (empty, kept for a minute)';
+      return text;
+    }
+
+    function button(label, onclick) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', onclick);
+      return b;
+    }
+
+    function renderGames(games) {
+      var list = $('games');
+      list.textContent = '';
+      games.forEach(function (g) {
+        var li = document.createElement('li');
+        var name = document.createElement('span'), place = document.createElement('span');
+        var seats = document.createElement('span');
+        name.className = 'name'; name.textContent = 'Game ' + g.id;
+        seats.className = 'seats'; seats.textContent = g.seats + '/2';
+        place.className = 'where'; place.textContent = where(g);
+        li.appendChild(name); li.appendChild(seats); li.appendChild(place);
+        if (g.open.length) {
+          var back = !!net.tokenFor(g.id, g.open);
+          li.appendChild(button(back ? 'Rejoin' : 'Join', function () { net.join(g.id); }));
+        }
+        list.appendChild(li);
+      });
+      $('none').hidden = games.length > 0;
+    }
+
+    function render() {
+      if (!net) return;
+      var msg = $('msg'), bad = false, text = '';
+      var inLobby = net.state === 'lobby';
+      var full = !!net.lobby && net.lobby.count >= net.lobby.max;
+      switch (net.state) {
+      case 'connecting': text = 'Connecting\u2026'; break;
+      case 'outdated': text = 'This page is out of date: the game was updated.'; bad = true; break;
+      case 'lost': text = 'The connection to the server was lost.'; bad = true; break;
+      case 'waiting': text = ''; break;
+      case 'playing': text = running ? '' : 'Joining the game\u2026'; break;
+      case 'lobby':
+        if (net.rejected && net.rejected.reason === 'full' || full) {
+          var l = net.lobby || net.rejected;
+          text = 'Server full (' + (l.count !== undefined ? l.count : net.rejected.count) + '/' +
+                 (l.max !== undefined ? l.max : net.rejected.max) + ')';
+          bad = true;
+        } else if (net.rejected && net.rejected.reason === 'nogame') text = 'That game has ended.';
+        else if (net.rejected && net.rejected.reason === 'closed') text = 'That game is full.';
+        else text = 'Pick a game to join, or start a new one.';
+        break;
+      }
+      if (net.state === 'outdated' || net.state === 'lost') {
+        text += ' Reload the page to continue.';
+      }
+      msg.textContent = text;
+      msg.className = bad ? 'bad' : '';
+      $('browse').hidden = !inLobby;
+      $('waiting').hidden = net.state !== 'waiting';
+      $('new').disabled = !inLobby || full;
+      $('retry').hidden = !inLobby || !full;
+      renderGames(net.lobby ? net.lobby.games : []);
+      if (inLobby) $('browse').hidden = false;
+
+      // Over the running game
+      var p = net.paused;
+      var st = $('status');
+      st.hidden = !net.waiting || !!(p && p.length);
+      st.textContent = net.waiting || '';
+      $('paused').hidden = !(running && p && p.length);
+      if (p && p.length) {
+        $('pausedmsg').textContent = 'Player ' + p.map(function (s) { return s + 1; }).join(' and ') + ' disconnected';
+      }
+      if (net.state === 'lost' && running) finish('The connection to the server was lost.');
+      if (net.ended) location.reload();
+    }
+
+    // Boot information has arrived (a game starts or is joined) and the runtime is loaded.
+    function maybeStart() {
+      if (!ready || running || !net || !net.bootReady()) return;
+      running = true;
+      $('lobby').hidden = true;
+      Module.canvas.focus();
+      Module.callMain(['--online']);
+    }
 
     // SDL's AudioContext may still be suspended (e.g. after the tab was in
     // the background): any gesture wakes it up.
@@ -153,11 +304,14 @@
 
     function finish(msg) {
       running = false;
-      if (msg) document.getElementById('endmsg').textContent = msg;
-      document.getElementById('end').hidden = false;
-      document.getElementById('again').focus();
+      if (msg) $('endmsg').textContent = msg;
+      $('end').hidden = false;
+      $('again').focus();
     }
-    document.getElementById('again').addEventListener('click', function () { location.reload(); });
+    $('again').addEventListener('click', function () { location.reload(); });
+
+    // net.js is part of the Emscripten script, which loads after this one.
+    window.addEventListener('load', lobbyInit);
   })();
 </script>
 {{{ SCRIPT }}}

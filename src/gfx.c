@@ -329,6 +329,8 @@ int rf_tile(int32_t x, int32_t y, int tile)
 
 void rf_refresh(void)
 {
+    if (plat_fast)
+        return;
     int fx = fine_x(), fy = fine_y();
     int stx = (int)(scroll_x >> 12), sty = (int)(scroll_y >> 12);
     /* drawing only: tile animation does not touch the game state */

@@ -607,8 +607,8 @@ static int main_menu(void)
     }
 }
 
-/* 0x91F5: attract loop -> menu. */
-void title_loop(void)
+/* A new game's record: four lives, no ammo, nothing found. */
+void game_new(void)
 {
     gs.lives = 4;
     gs.ammo = 0;
@@ -617,6 +617,12 @@ void title_loop(void)
     memset(gs.keys, 0, sizeof gs.keys);
     memset(gs.done, 0, sizeof gs.done);
     game_loaded = 0;
+}
+
+/* 0x91F5: attract loop -> menu. */
+void title_loop(void)
+{
+    game_new();
     if (warp_level)
         return;
     for (;;) {
@@ -994,7 +1000,7 @@ static int map_press(int p, int lvl)
     } else {
         game.req_mask |= 1 << p;
     }
-    if (game.req_mask != (1 << nplayers) - 1)
+    if (game.req_mask != game.present)
         return 0;
     game.entry_x = objs[game.req_by].x;
     game.entry_y = objs[game.req_by].y;
@@ -1109,8 +1115,14 @@ static int map_coop_player(int pi)
 }
 
 /* One simulated frame of the co-op world map. Returns the level to start, or 0. */
+static int map_restart;             /* online: a snapshot arrived, the map phase starts over from it */
+
 static int map_frame(void)
 {
+    if (net_online && net_frame_begin()) {
+        map_restart = 1;
+        return 0;
+    }
     frame_start();
     if (replaying)
         replay_apply();
@@ -1127,6 +1139,8 @@ static int map_frame(void)
         if (game.req_by >= 0 && !map_touches_level(game.req_by, game.req_level))
             game.req_by = -1;           /* the requester walked off the entrance */
         for (int i = 0; i < nplayers; i++) {
+            if (!PRESENT(i))
+                continue;
             int lvl = map_coop_player(i);
             if (lvl && !start)
                 start = lvl;
@@ -1150,17 +1164,23 @@ static int map_frame(void)
     }
     draw_camera();
     for (int i = 0; i < nplayers; i++)
-        draw_keen(objs[i].x, objs[i].y, objs[i].sprite + objs[i].timer, i);
+        if (PRESENT(i))
+            draw_keen(objs[i].x, objs[i].y, objs[i].sprite + objs[i].timer, i);
     frame_refresh();
     for (int i = 0; i < nplayers; i++) {
-        players[i].map_x = objs[i].x;
-        players[i].map_y = objs[i].y;
+        if (PRESENT(i)) {
+            players[i].map_x = objs[i].x;
+            players[i].map_y = objs[i].y;
+        }
         players[i].ctrl_prev = players[i].ctrl;
     }
-    map_sx = players[0].cam_x;
-    map_sy = players[0].cam_y;
-    gs.mapx = players[0].map_x;
-    gs.mapy = players[0].map_y;
+    int lead = 0;                       /* the shared record follows the lowest-numbered player */
+    while (lead < nplayers - 1 && !PRESENT(lead))
+        lead++;
+    map_sx = players[lead].cam_x;
+    map_sy = players[lead].cam_y;
+    gs.mapx = players[lead].map_x;
+    gs.mapy = players[lead].map_y;
     gs.mapsx = map_sx;
     gs.mapsy = map_sy;
     frame_no++;
@@ -1179,6 +1199,8 @@ static int coop_map_loop(void)
     for (int i = 0; i < nplayers; i++) {
         obj_t *k = &objs[i];
         memset(k, 0, sizeof *k);
+        if (!PRESENT(i))
+            continue;
         k->type = OT_KEEN;
         k->think = think_none;
         k->touch = touch_none;
@@ -1193,9 +1215,18 @@ static int coop_map_loop(void)
     gtick = 0;
     frame_no = 0;
     rf_hook = ui_overlay_hook;
+    map_restart = 0;
+    if (net_online) {
+        net_segment_begin();
+        net_restore_apply();        /* a joiner or a repaired browser continues from a snapshot */
+    }
     int chosen = 0;
     for (;;) {
         chosen = map_frame();
+        if (map_restart) {
+            chosen = -1;
+            break;
+        }
         if (chosen)
             break;
         if (!replaying) {
@@ -1205,9 +1236,21 @@ static int coop_map_loop(void)
                  * events go through the input stream around the local screen. */
                 ui_emit(local_player, EV_PAUSE_ON);
                 map_frame();
+                if (map_restart) {
+                    chosen = -1;
+                    break;
+                }
+                if (net_online)
+                    net_local_screen(1);    /* the others' frames need our (neutral) input meanwhile */
                 ui_run_screen(screen);
+                if (net_online)
+                    net_local_screen(0);
                 ui_emit(local_player, EV_PAUSE_OFF);
                 chosen = map_frame();
+                if (map_restart) {
+                    chosen = -1;
+                    break;
+                }
                 reset_frame_time();
                 if (chosen)
                     break;
@@ -1232,6 +1275,8 @@ static void level_teleport(void)
     int32_t ty = ds_l(0x286a);
     for (int i = 0; i < nplayers; i++) {
         obj_t *k = &objs[i];
+        if (!PRESENT(i))
+            continue;
         k->dx = k->dy = k->xv = k->yv = 0;
         k->sprite = 0x24;
         k->x = players[i].map_x = tx;
@@ -1241,6 +1286,8 @@ static void level_teleport(void)
     if (game.coop) {
         /* Everybody arrives at once; the pad animation runs as a timed state. */
         for (int i = 0; i < nplayers; i++) {
+            if (!PRESENT(i))
+                continue;
             player_t *pl = &players[i];
             pl->cam_x = tx - 0x9000;
             pl->cam_y = ty - 0x3000;
@@ -1591,6 +1638,9 @@ void game_setup(void)
         players[i].status = PS_ALIVE;
         players[i].tele = TP_NONE;
     }
+    game.levels_started = 0;
+    if (!net_online)
+        game.present = (1 << nplayers) - 1;
     block_mask = 0x8000;
     last_extra = gs.score / 20000 * 20000;
     abort_game = 0;
@@ -1605,11 +1655,19 @@ void play_game(void)
 {
     int result = LR_DIED;
     int recenter = 0;           /* co-op: put every Keen at the entrance and centre the cameras */
+    int resume_level = 0;       /* online: the level a snapshot to restore was taken in */
     flush_input();
     game_setup();
+    if (net_online) {
+        int kind = net_resume(&resume_level);
+        if (kind != 2)
+            resume_level = 0;
+    }
     do {
         for (int i = 0; i < nplayers; i++) {
             obj_t *k = &objs[i];
+            if (!PRESENT(i))
+                continue;
             k->dx = k->dy = k->xv = k->yv = 0;
             k->sprite = 0x24;
         }
@@ -1638,6 +1696,8 @@ void play_game(void)
             }
         }
         for (int i = 0; i < nplayers; i++) {
+            if (!PRESENT(i))
+                continue;
             objs[i].x = players[i].map_x;
             objs[i].y = players[i].map_y;
             if (recenter)
@@ -1665,7 +1725,9 @@ void play_game(void)
         } else {
             draw_camera();
         }
-        if (!warp_level) {
+        if (resume_level) {
+            sel_level = resume_level;       /* online: straight back into the level of the snapshot */
+        } else if (!warp_level) {
             frame_start();
             frame_refresh();
             if (result == LR_DIED && !game.coop)
@@ -1691,6 +1753,14 @@ void play_game(void)
             reset_frame_time();
             if (game.coop) {
                 sel_level = coop_map_loop();
+                if (sel_level < 0) {
+                    /* online: a snapshot arrived; start the segment it belongs to from it */
+                    in_world_map = 0;
+                    int kind = net_resume(&resume_level);
+                    if (kind != 2)
+                        resume_level = 0;
+                    continue;
+                }
                 if (!sel_level)
                     goto out;       /* quit, or a replay ran out */
             } else {
@@ -1734,13 +1804,21 @@ void play_game(void)
         } else {
             sel_level = warp_level;
         }
-        if (sel_level >= 1 && sel_level <= 16 && !gs.done[sel_level - 1]) {
+        if (resume_level || (sel_level >= 1 && sel_level <= 16 && !gs.done[sel_level - 1])) {
             snd_play(3);
+            resume_level = 0;
             do {
                 result = play_level(sel_level & 0xff);
                 if (replaying)
                     replay_report(sel_level, result);
             } while (game.coop && result == LR_FAIL && !abort_game);   /* restarts at once */
+            if (result == LR_RESTORE) {
+                /* online: a snapshot arrived mid-level; carry on from it, in whatever it is */
+                int kind = net_resume(&resume_level);
+                if (kind != 2)
+                    resume_level = 0;
+                continue;
+            }
             if (abort_game) {
                 abort_game = 0;
                 goto out;
@@ -1763,10 +1841,14 @@ void play_game(void)
                 if (game.coop)
                     recenter = result != LR_TELEPORT;
                 if (result != LR_VOTE_LEAVE && gs.joystick && gs.battery && gs.vacuum && gs.whiskey) {
-                    if (replaying)
+                    if (replaying) {
                         printf("replay: all four ship parts: the ending plays\n");
-                    else
-                        ending();       /* for every player in the game */
+                    } else {
+                        net_event(1);   /* online: tell the server the ending started */
+                        if (!plat_headless())
+                            ending();   /* for every player in the game (it waits for keys) */
+                        net_event(2);
+                    }
                     goto out;
                 }
             }
@@ -1775,6 +1857,8 @@ void play_game(void)
     snd_wait();
     fade_in();
 out:
+    if (net_online)
+        net_idle_forever();     /* the page goes back to the lobby when the server says so */
     if (!replaying)
         game_over();
 }

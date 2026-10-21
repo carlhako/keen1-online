@@ -7,12 +7,23 @@
 #include <string.h>
 
 #include "game.h"
+#include "kdata.h"
 
-game_t game = {.req_by = -1};
+game_t game = {.req_by = -1, .present = 1};
 
+/* The players whose Keens are in the game: a vote or a start request needs every one of them. */
 static int all_players(void)
 {
-    return (1 << nplayers) - 1;
+    return game.present;
+}
+
+/* Everybody present starts alive; an empty seat has no status. */
+static void reset_statuses(void)
+{
+    for (int i = 0; i < nplayers; i++) {
+        players[i].status = PRESENT(i) ? PS_ALIVE : PS_ABSENT;
+        players[i].tele = TP_NONE;
+    }
 }
 
 /* A level starts: nobody has voted, no message is up, everybody is alive, and
@@ -26,10 +37,7 @@ void coop_level_begin(void)
     game.shake = 0;
     memset(game.banner, 0, sizeof game.banner);
     game.start_gs = gs;
-    for (int i = 0; i < nplayers; i++) {
-        players[i].status = PS_ALIVE;
-        players[i].tele = TP_NONE;
-    }
+    reset_statuses();
 }
 
 /* The level failed or was left: the shared record goes back to how it was at
@@ -49,10 +57,7 @@ void coop_map_begin(void)
     game.req_mask = 0;
     game.shake = 0;
     memset(game.banner, 0, sizeof game.banner);
-    for (int i = 0; i < nplayers; i++) {
-        players[i].status = PS_ALIVE;
-        players[i].tele = TP_NONE;
-    }
+    reset_statuses();
 }
 
 /* This frame's one-frame events. Votes count in a level; the pause bits are for
@@ -116,9 +121,9 @@ int coop_level_eval(void)
     }
     if (!alive)
         return exited ? LR_DONE : LR_FAIL;
-    if (game.restart_votes == all_players())
+    if (game.restart_votes && game.restart_votes == all_players())
         return LR_FAIL;
-    if (game.map_votes == all_players())
+    if (game.map_votes && game.map_votes == all_players())
         return LR_VOTE_LEAVE;
     return -1;
 }
@@ -133,8 +138,97 @@ void coop_follow_cameras(void)
     if (target < 0)
         return;
     for (int p = 0; p < nplayers; p++)
-        if (players[p].status != PS_ALIVE) {
+        if (players[p].status != PS_ALIVE && players[p].status != PS_ABSENT) {
             players[p].cam_x = players[target].cam_x;
             players[p].cam_y = players[target].cam_y;
         }
+}
+
+/* ------------------------------------------------------------------ */
+/* Online: players join and leave a running game. Both happen on a frame every
+ * browser agrees on (the server seals them into the frame stream), so every
+ * machine changes the game the same way. */
+
+extern void keen_walk(void), keen_touch(obj_t *, obj_t *);
+
+/* Where the Keen of a joining player goes: on top of the lowest-numbered Keen that is
+ * alive, else any Keen in the game, else where the level starts (or the map's entrance). */
+static void join_position(int seat, int32_t *x, int32_t *y)
+{
+    int ref = -1;
+    for (int pass = 0; pass < 2 && ref < 0; pass++)
+        for (int p = 0; p < nplayers && ref < 0; p++)
+            if (p != seat && PRESENT(p) && objs[p].type == OT_KEEN &&
+                (pass == 1 || players[p].status == PS_ALIVE))
+                ref = p;
+    if (ref >= 0) {
+        *x = objs[ref].x;
+        *y = objs[ref].y;
+        return;
+    }
+    *x = gs.mapx;
+    *y = gs.mapy;
+    if (!in_world_map)
+        for (int ty = 0; ty < map_h; ty++)
+            for (int tx = 0; tx < map_w; tx++)
+                if (MAPI(tx, ty) == 0xff) {
+                    *x = (int32_t)tx << 12;
+                    *y = ((int32_t)ty << 12) + 0x800;
+                    return;
+                }
+}
+
+void coop_add_player(int seat)
+{
+    if (seat < 0 || seat >= nplayers)
+        return;
+    int32_t x, y;
+    join_position(seat, &x, &y);
+    player_t *pl = &players[seat];
+    obj_t *k = &objs[seat];
+    game.present |= 1 << seat;
+    memset(k, 0, sizeof *k);
+    k->type = OT_KEEN;
+    k->active = 1;
+    k->x = x;
+    k->y = y;
+    pl->ctrl = pl->ctrl_prev = (ctrl_t){8, 0, 0, 0};
+    pl->status = PS_ALIVE;
+    pl->tele = TP_NONE;
+    pl->invuln = 0;
+    pl->facing = 1;
+    if (in_world_map) {
+        k->think = think_none;
+        k->touch = touch_none;
+        k->sprite = 0x24;
+        pl->map_x = x;
+        pl->map_y = y;
+        map_camera_center(seat);
+    } else {
+        k->think = keen_walk;
+        k->touch = keen_touch;
+        k->sprite = 4;
+        camera_start(seat);
+    }
+}
+
+void coop_remove_player(int seat)
+{
+    if (seat < 0 || seat >= nplayers)
+        return;
+    int bit = 1 << seat;
+    game.present &= ~bit;
+    memset(&objs[seat], 0, sizeof objs[seat]);
+    players[seat].status = PS_ABSENT;
+    players[seat].tele = TP_NONE;
+    players[seat].ctrl = players[seat].ctrl_prev = (ctrl_t){8, 0, 0, 0};
+    game.restart_votes &= ~bit;
+    game.map_votes &= ~bit;
+    game.pause_mask &= ~bit;
+    game.req_mask &= ~bit;
+    if (game.req_by == seat) {
+        game.req_by = -1;
+        game.req_level = 0;
+        game.req_mask = 0;
+    }
 }
