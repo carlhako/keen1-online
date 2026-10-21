@@ -33,6 +33,8 @@ extern void (*rf_hook)(void);
 
 void rf_begin(void);                                /* start a new frame */
 int rf_sprite(int32_t x, int32_t y, int sprite);    /* queue a sprite */
+int rf_sprite_ex(int32_t x, int32_t y, int sprite, int remap);
+void rf_label(int32_t x, int32_t y, const char *text);
 int rf_tile(int32_t x, int32_t y, int tile);        /* queue an overlay tile */
 void rf_refresh(void);                              /* draw and show the frame */
 

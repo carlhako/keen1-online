@@ -10,7 +10,12 @@
 #include "platform.h"
 
 gamestate_t gs;
-ctrl_t ctrl, ctrl_prev;
+player_t players[MAXPLAYERS];
+int nplayers = 1;
+int local_player;
+player_t *cur_plr = &players[0];
+uint32_t gtick;
+uint32_t frame_no;
 int tics;
 static uint32_t lasttick;
 obj_t objs[MAXOBJS], cur;
@@ -18,26 +23,32 @@ int numobjs;
 spec_t specs[MAXSPECS];
 int numspecs;
 int cur_level;
-int scroll_tx, scroll_ty;
 int32_t scrollmin_x, scrollmin_y, scrollmax_x, scrollmax_y;
 int32_t objmax_x, objmax_y, keenmax_x, keendeath_y;
-int keen_facing, lights_on = 1, keen_invuln, on_switch, switch_x, switch_y;
+int lights_on = 1;
 int level_result, godmode, abort_game, warp_level;
 int32_t last_extra;
 int in_world_map;
 
+/* The Keen being thought for (set by play_level before each Keen's think). */
+#define plr cur_plr
+
 /* Control bindings from CTLPANEL.CK1: 8 direction keys, 2 buttons. */
 uint8_t key_dir[8] = {0x48, 0x49, 0x4d, 0x51, 0x50, 0x4f, 0x4b, 0x47};
 uint8_t key_b1 = 0x1d, key_b2 = 0x38;
+/* Player 2's keys (local two-player mode): Q W E / A D / Z S C around the
+ * home row, V jumps, B pogos, so both players fit on one keyboard. */
+const uint8_t key2_dir[8] = {0x11, 0x12, 0x20, 0x2e, 0x1f, 0x2c, 0x1e, 0x10};
+const uint8_t key2_b1 = 0x2f, key2_b2 = 0x30;
 
 /* ------------------------------------------------------------------ */
 /* Random numbers: a 256 byte table (DS:4F86) and an additive generator
  * seeded from DS:50AE. Both are seeded from the clock like the original. */
 
-static int rnd_index;
-static uint16_t rng_state[18];
-static int rng_a = 0x22, rng_b = 0x0a;
-static uint16_t rng_sum;
+int rnd_index;
+uint16_t rng_state[18];
+int rng_a = 0x22, rng_b = 0x0a;
+uint16_t rng_sum;
 
 int rand8(void)
 {
@@ -72,7 +83,13 @@ int rand_range(int max)
 
 void rng_init(void)
 {
-    time_t t = time(NULL);
+    rng_seed((uint32_t)time(NULL));
+}
+
+/* All game randomness comes from this state (rand8, rand_range); it is part
+ * of every snapshot. The same seed gives the same sequence on any machine. */
+void rng_seed(uint32_t t)
+{
     for (int i = 0; i < 17; i++)
         rng_state[i + 1] = (uint16_t)ds_w(0x50ae + i * 2);
     rng_sum = 0;
@@ -87,20 +104,31 @@ void rng_init(void)
 /* ------------------------------------------------------------------ */
 /* Frame pacing (0x0239) and refresh (0x0289). */
 
+/* The simulation always advances SIM_TICS ticks per frame. Real time only
+ * paces drawing: a slow machine slows the game down instead of taking bigger
+ * steps, so every machine sees the same game. */
 void frame_start(void)
 {
     rf_begin();
-    for (;;) {
-        uint32_t now = plat_ticks();
-        uint32_t d = now - lasttick;
-        if (d >= 6) {
-            tics = d > 15 ? 15 : (int)d;
-            lasttick = now;
-            break;
+    if (plat_headless()) {
+        /* Headless replay: no pacing, optionally a fixed delay to show that
+         * results do not depend on real time. */
+        if (headless_delay_ms > 0)
+            plat_delay(headless_delay_ms);
+    } else {
+        for (;;) {
+            /* pacing only: wall-clock time never reaches the game state */
+            uint32_t now = plat_ticks();
+            if (now - lasttick >= SIM_TICS) {
+                lasttick = now;
+                break;
+            }
+            plat_pump();
+            plat_delay(1);
         }
-        plat_pump();
-        plat_delay(1);
     }
+    tics = SIM_TICS;
+    gtick += SIM_TICS;
 }
 
 void frame_refresh(void)
@@ -111,25 +139,47 @@ void frame_refresh(void)
 /* Reset frame timing after a pause (menus, windows). */
 void reset_frame_time(void)
 {
-    lasttick = plat_ticks();
+    lasttick = plat_ticks();    /* pacing only */
 }
 
-void read_ctrl(ctrl_t *c)
+static void read_keys(ctrl_t *c, const uint8_t *dir, int b1, int b2)
 {
     plat_pump();
     int y = 0, x = 0;
-    if (keydown[key_dir[0]]) y = -1;
-    if (keydown[key_dir[2]]) x = 1;
-    if (keydown[key_dir[4]]) y = 1;
-    if (keydown[key_dir[6]]) x = -1;
-    if (keydown[key_dir[1]]) { y = -1; x = 1; }
-    if (keydown[key_dir[7]]) { y = -1; x = -1; }
-    if (keydown[key_dir[3]]) { y = 1; x = 1; }
-    if (keydown[key_dir[5]]) { y = 1; x = -1; }
+    if (keydown[dir[0]]) y = -1;
+    if (keydown[dir[2]]) x = 1;
+    if (keydown[dir[4]]) y = 1;
+    if (keydown[dir[6]]) x = -1;
+    if (keydown[dir[1]]) { y = -1; x = 1; }
+    if (keydown[dir[7]]) { y = -1; x = -1; }
+    if (keydown[dir[3]]) { y = 1; x = 1; }
+    if (keydown[dir[5]]) { y = 1; x = -1; }
     static const int dirs[9] = {7, 0, 1, 6, 8, 2, 5, 4, 3};
     c->dir = dirs[y * 3 + x + 4];
-    c->b1 = keydown[key_b1] != 0;
-    c->b2 = keydown[key_b2] != 0;
+    c->b1 = keydown[b1] != 0;
+    c->b2 = keydown[b2] != 0;
+}
+
+/* Menus and windows read key set 1. */
+void read_ctrl(ctrl_t *c)
+{
+    read_keys(c, key_dir, key_b1, key_b2);
+}
+
+/* In a level or on the map: the input of player p for this frame, from that
+ * player's input source. A replay (or later the network) has set it already. */
+void read_player_ctrl(int p)
+{
+    switch (players[p].input) {
+    case IN_KEYS1:
+        read_keys(&players[p].ctrl, key_dir, key_b1, key_b2);
+        break;
+    case IN_KEYS2:
+        read_keys(&players[p].ctrl, key2_dir, key2_b1, key2_b2);
+        break;
+    case IN_REPLAY:
+        break;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -184,7 +234,7 @@ void spec_none(spec_t *s) { (void)s; }
 
 obj_t *new_obj(void)
 {
-    int i = 1;
+    int i = nplayers;        /* slots 0..nplayers-1 belong to the Keens */
     while (i < numobjs && objs[i].type)
         i++;
     if (i >= MAXOBJS)
@@ -381,7 +431,8 @@ static int obj_offscreen(void)
         }
     }
     int tx = cur.x >> 12, ty = cur.y >> 12;
-    if (tx < scroll_tx - 8 || ty < scroll_ty - 8 || tx > scroll_tx + 0x1c || ty > scroll_ty + 0x12) {
+    /* Stays awake while any player's camera still sees it. */
+    if (!cam_sees(tx, ty, 9, 9, 0x1d, 0x13)) {
         if (cur.type < 9)
             cur.active = 0;
         else
@@ -404,19 +455,68 @@ void add_score(int pts)
     }
 }
 
-/* 0x42E9: works on the stored Keen object (called outside his think). */
-void kill_keen(void)
+/* Players and cameras */
+
+static int keen_living(const obj_t *o)
 {
-    if (godmode || keen_invuln)
-        return;
+    extern void keen_exit_walk(void);
     extern void keen_dying(void);
-    objs[0].think = keen_dying;
-    objs[0].touch = touch_none;
-    objs[0].y += 0x800;
-    objs[0].yv = 0;
-    objs[0].xv = 0;
-    objs[0].timer = 0;
-    objs[0].sprite = 0x16;
+    return o->type == OT_KEEN && o->think != keen_dying && o->think != keen_exit_walk;
+}
+
+/* Player number of a Keen object (slot index), or -1 for anything else. */
+int player_of(const obj_t *o)
+{
+    int i = (int)(o - objs);
+    return i >= 0 && i < nplayers ? i : -1;
+}
+
+/* Nearest living Keen to `cur`, measured horizontally; ties go to the lower
+ * player number. With nobody alive it is Keen 0, as in the original. */
+obj_t *nearest_keen(void)
+{
+    obj_t *best = NULL;
+    int32_t bd = 0;
+    for (int i = 0; i < nplayers; i++) {
+        if (!keen_living(&objs[i]))
+            continue;
+        int32_t d = objs[i].x > cur.x ? objs[i].x - cur.x : cur.x - objs[i].x;
+        if (!best || d < bd) {
+            best = &objs[i];
+            bd = d;
+        }
+    }
+    return best ? best : &objs[0];
+}
+
+/* True if the tile (tx, ty) lies inside the window around any camera of a
+ * player still in the level: cam_tx - l < tx < cam_tx + r, same for y. */
+int cam_sees(int tx, int ty, int l, int t, int r, int b)
+{
+    for (int i = 0; i < nplayers; i++) {
+        if (objs[i].type != OT_KEEN)
+            continue;
+        const player_t *p = &players[i];
+        if (p->cam_tx - l < tx && p->cam_ty - t < ty && tx < p->cam_tx + r && ty < p->cam_ty + b)
+            return 1;
+    }
+    return 0;
+}
+
+/* 0x42E9: works on the stored Keen object (called outside his think). */
+void kill_keen(obj_t *k)
+{
+    extern void keen_dying(void);
+    int p = player_of(k);
+    if (godmode || (p >= 0 && players[p].invuln))
+        return;
+    k->think = keen_dying;
+    k->touch = touch_none;
+    k->y += 0x800;
+    k->yv = 0;
+    k->xv = 0;
+    k->timer = 0;
+    k->sprite = 0x16;
     snd_play(8);
 }
 
@@ -428,8 +528,8 @@ static void keen_fell(void)
     cur.touch = touch_none;
     cur.y += 0x800;
     cur.xv = 0;
-    objs[0].yv = 0;
-    objs[0].xv = 0;
+    objs[plr - players].yv = 0;
+    objs[plr - players].xv = 0;
     cur.timer = 0;
     cur.sprite = 0x16;
     snd_play(8);
@@ -459,34 +559,36 @@ static void keen_bounds(void)
     }
 }
 
-/* 0x34A1: scroll to follow Keen. */
+/* 0x34A1: scroll to follow Keen i. Each player has a camera of his own. */
 extern void keen_exit_walk(void);
 extern void keen_dying(void);
 
-static void scroll_follow(void)
+static void scroll_follow(int i)
 {
-    if (objs[0].think == keen_exit_walk || objs[0].think == keen_dying)
+    obj_t *k = &objs[i];
+    player_t *p = &players[i];
+    if (k->think == keen_exit_walk || k->think == keen_dying)
         return;
-    int32_t kx = objs[0].x - scroll_x, ky = objs[0].y - scroll_y;
-    if (objs[0].dx > 0 && kx > 0xb000) {
-        scroll_x += objs[0].dx;
-        if (scroll_x > scrollmax_x)
-            scroll_x = scrollmax_x;
-    } else if (objs[0].dx < 0 && kx < 0x9000) {
-        scroll_x += objs[0].dx;
-        if (scroll_x < scrollmin_x)
-            scroll_x = scrollmin_x;
+    int32_t kx = k->x - p->cam_x, ky = k->y - p->cam_y;
+    if (k->dx > 0 && kx > 0xb000) {
+        p->cam_x += k->dx;
+        if (p->cam_x > scrollmax_x)
+            p->cam_x = scrollmax_x;
+    } else if (k->dx < 0 && kx < 0x9000) {
+        p->cam_x += k->dx;
+        if (p->cam_x < scrollmin_x)
+            p->cam_x = scrollmin_x;
     }
-    if (objs[0].dy > 0 && ky > 0x7000) {
-        scroll_y += objs[0].dy;
-        if (scroll_y > scrollmax_y)
-            scroll_y = scrollmax_y;
+    if (k->dy > 0 && ky > 0x7000) {
+        p->cam_y += k->dy;
+        if (p->cam_y > scrollmax_y)
+            p->cam_y = scrollmax_y;
         return;
     }
-    if (objs[0].dy < 0 && ky < 0x3000) {
-        scroll_y += objs[0].dy;
-        if (scroll_y < scrollmin_y)
-            scroll_y = scrollmin_y;
+    if (k->dy < 0 && ky < 0x3000) {
+        p->cam_y += k->dy;
+        if (p->cam_y < scrollmin_y)
+            p->cam_y = scrollmin_y;
     }
 }
 
@@ -508,7 +610,7 @@ static void start_jump(void)
     cur.xv = 0;
     cur.w2c = 0;
     cur.timer = 0;
-    cur.w26 = keen_facing >= 0 ? 8 : 0xe;
+    cur.w26 = plr->facing >= 0 ? 8 : 0xe;
     cur.think = keen_jump_charge;
 }
 
@@ -518,7 +620,7 @@ static void start_shoot(void)
     cur.dx = 0;
     cur.w2c = 0;
     cur.timer = 0;
-    cur.sprite = keen_facing > 0 ? 0x14 : 0x15;
+    cur.sprite = plr->facing > 0 ? 0x14 : 0x15;
 }
 
 /* 0x38F0: standing / walking */
@@ -533,20 +635,20 @@ void keen_walk(void)
                 slip = v;
         }
     }
-    if (ctrl.b1)
+    if (plr->ctrl.b1)
         start_jump();
     if (slip < 3) {
-        if (ctrl.dir >= 1 && ctrl.dir <= 3) {
+        if (plr->ctrl.dir >= 1 && plr->ctrl.dir <= 3) {
             accel_x(2);
             if (cur.xv < 0)
-                ctrl.dir = 8;
-        } else if (ctrl.dir >= 5 && ctrl.dir <= 7) {
+                plr->ctrl.dir = 8;
+        } else if (plr->ctrl.dir >= 5 && plr->ctrl.dir <= 7) {
             accel_x(-2);
             if (cur.xv > 0)
-                ctrl.dir = 8;
+                plr->ctrl.dir = 8;
         }
     }
-    if (slip == 1 && ctrl.dir == 8) {
+    if (slip == 1 && plr->ctrl.dir == 8) {
         if (cur.xv > 0) {
             accel_x(-3);
             if (cur.xv < 0)
@@ -558,19 +660,19 @@ void keen_walk(void)
         }
     }
     if (slip == 3) {
-        if (keen_facing > 0)
+        if (plr->facing > 0)
             cur.xv = 0xb4;
-        else if (keen_facing < 0)
+        else if (plr->facing < 0)
             cur.xv = -0xb4;
     }
-    uint32_t tick = plat_ticks();
+    uint32_t tick = gtick;
     if (cur.xv == 0) {
-        cur.sprite = keen_facing >= 0 ? 0 : 4;
+        cur.sprite = plr->facing >= 0 ? 0 : 4;
     } else {
         cur.sprite = cur.xv > 0 ? 0 : 4;
         if (slip < 3)
             cur.sprite += (tick >> 4) & 3;
-        keen_facing = cur.xv;
+        plr->facing = cur.xv;
     }
     if (cur.xv != 0 && ((tick >> 4) & 1) && slip < 3)
         snd_play(((tick >> 5) & 1) ? 0x1e : 4);
@@ -584,10 +686,10 @@ void keen_walk(void)
         snd_play(0x1b);
         return;
     }
-    if (ctrl.b1)
+    if (plr->ctrl.b1)
         start_jump();
-    if (ctrl.b2 && !ctrl_prev.b2) {
-        if (on_switch) {
+    if (plr->ctrl.b2 && !plr->ctrl_prev.b2) {
+        if (plr->on_switch) {
             switch_activate();
         } else {
             cur.timer = 0;
@@ -597,7 +699,7 @@ void keen_walk(void)
                 cur.think = keen_pogo_charge;
         }
     }
-    if (ctrl.b1 && ctrl.b2 && !ctrl_prev.b1 && !ctrl_prev.b2)
+    if (plr->ctrl.b1 && plr->ctrl.b2 && !plr->ctrl_prev.b1 && !plr->ctrl_prev.b2)
         start_shoot();
     if (cur.w30)
         cur.w30--;
@@ -607,15 +709,15 @@ void keen_walk(void)
 void keen_jump_charge(void)
 {
     cur.sprite = cur.w26 + cur.timer / 6;
-    if (ctrl.b1)
+    if (plr->ctrl.b1)
         cur.w2c += tics * 6;
     else if (cur.timer < 12)
         cur.timer = 24 - cur.timer;
-    if (ctrl.dir >= 1 && ctrl.dir <= 3) {
+    if (plr->ctrl.dir >= 1 && plr->ctrl.dir <= 3) {
         cur.w2e += tics * 2;
         if (cur.w2e > 120)
             cur.w2e = 120;
-    } else if (ctrl.dir >= 5 && ctrl.dir <= 7) {
+    } else if (plr->ctrl.dir >= 5 && plr->ctrl.dir <= 7) {
         cur.w2e -= tics * 2;
         if (cur.w2e < -120)
             cur.w2e = -120;
@@ -631,23 +733,23 @@ void keen_jump_charge(void)
     gravity();
     move_obj();
     keen_bounds();
-    if (ctrl.b1 && ctrl.b2)
+    if (plr->ctrl.b1 && plr->ctrl.b2)
         start_shoot();
 }
 
 /* 0x3D22: in the air */
 void keen_air(void)
 {
-    if (ctrl.dir >= 1 && ctrl.dir <= 3) {
+    if (plr->ctrl.dir >= 1 && plr->ctrl.dir <= 3) {
         accel_x(2);
         if (cur.xv < 0)
-            ctrl.dir = 8;
-    } else if (ctrl.dir >= 5 && ctrl.dir <= 7) {
+            plr->ctrl.dir = 8;
+    } else if (plr->ctrl.dir >= 5 && plr->ctrl.dir <= 7) {
         accel_x(-2);
         if (cur.xv > 0)
-            ctrl.dir = 8;
+            plr->ctrl.dir = 8;
     }
-    if (ctrl.dir == 8) {
+    if (plr->ctrl.dir == 8) {
         if (cur.xv > 0) {
             accel_x(-1);
             if (cur.xv < 0)
@@ -658,12 +760,12 @@ void keen_air(void)
                 cur.xv = 0;
         }
     }
-    cur.sprite = keen_facing > 0 ? 0xd : 0x13;
+    cur.sprite = plr->facing > 0 ? 0xd : 0x13;
     if (cur.xv != 0)
-        keen_facing = cur.xv;
+        plr->facing = cur.xv;
     gravity();
     int f = move_obj();
-    uint32_t tick = plat_ticks();
+    uint32_t tick = gtick;
     if ((f & 5) && ((tick >> 4) & 1))
         snd_play(5);
     if (f & 2) {
@@ -674,13 +776,13 @@ void keen_air(void)
     if (f & 8)
         snd_play(0x15);
     keen_bounds();
-    if (ctrl.b2 && !ctrl_prev.b2) {
-        if (on_switch)
+    if (plr->ctrl.b2 && !plr->ctrl_prev.b2) {
+        if (plr->on_switch)
             switch_activate();
         else if (gs.pogo)
             cur.think = keen_pogo_air;
     }
-    if (ctrl.b1 && ctrl.b2 && !ctrl_prev.b1 && !ctrl_prev.b2)
+    if (plr->ctrl.b1 && plr->ctrl.b2 && !plr->ctrl_prev.b1 && !plr->ctrl_prev.b2)
         start_shoot();
 }
 
@@ -698,7 +800,7 @@ void keen_shoot(void)
         }
         cur.w2c = 1;
     }
-    if (cur.timer > 0x1e && !ctrl.b1 && !ctrl.b2)
+    if (cur.timer > 0x1e && !plr->ctrl.b1 && !plr->ctrl.b2)
         cur.think = keen_walk;
     if (cur.xv > 0) {
         accel_x(-1);
@@ -717,27 +819,28 @@ void keen_shoot(void)
 /* 0x3F51: bouncing on the pogo stick */
 void keen_pogo_air(void)
 {
-    read_ctrl(&ctrl);
-    if (ctrl.dir >= 1 && ctrl.dir <= 3) {
+    /* The original re-polls the keys here; the frame's input is fixed at the
+     * start of the frame instead, so every machine sees the same value. */
+    if (plr->ctrl.dir >= 1 && plr->ctrl.dir <= 3) {
         accel_x(1);
         if (cur.xv < 0)
-            ctrl.dir = 8;
-    } else if (ctrl.dir >= 5 && ctrl.dir <= 7) {
+            plr->ctrl.dir = 8;
+    } else if (plr->ctrl.dir >= 5 && plr->ctrl.dir <= 7) {
         accel_x(-1);
         if (cur.xv > 0)
-            ctrl.dir = 8;
+            plr->ctrl.dir = 8;
     }
-    if (ctrl.b1 && cur.yv < 0)
+    if (plr->ctrl.b1 && cur.yv < 0)
         accel_y_limit(200, -1);
-    if (godmode && ctrl.b1)
+    if (godmode && plr->ctrl.b1)
         cur.yv = -200;
     if (cur.xv != 0)
-        keen_facing = cur.xv;
-    cur.w26 = keen_facing >= 0 ? 0x18 : 0x1a;
+        plr->facing = cur.xv;
+    cur.w26 = plr->facing >= 0 ? 0x18 : 0x1a;
     cur.sprite = cur.w26;
     gravity();
     int f = move_obj();
-    uint32_t tick = plat_ticks();
+    uint32_t tick = gtick;
     if ((f & 5) && ((tick >> 4) & 1))
         snd_play(5);
     if (f & 2) {
@@ -749,13 +852,13 @@ void keen_pogo_air(void)
     if (f & 8)
         snd_play(0x15);
     keen_bounds();
-    if (ctrl.b2 && !ctrl_prev.b2) {
-        if (on_switch)
+    if (plr->ctrl.b2 && !plr->ctrl_prev.b2) {
+        if (plr->on_switch)
             switch_activate();
         else
             cur.think = keen_air;
     }
-    if (ctrl.b1 && ctrl.b2)
+    if (plr->ctrl.b1 && plr->ctrl.b2)
         start_shoot();
     if (cur.w30)
         cur.w30--;
@@ -775,9 +878,9 @@ void keen_pogo_charge(void)
         cur.xv = cur.w2c;
         snd_play(6);
     }
-    if (ctrl.b2 && !ctrl_prev.b2)
+    if (plr->ctrl.b2 && !plr->ctrl_prev.b2)
         cur.think = keen_walk;
-    if (ctrl.b1 && ctrl.b2)
+    if (plr->ctrl.b1 && plr->ctrl.b2)
         start_shoot();
     move_obj();
     cur.w30 = 0;
@@ -786,7 +889,7 @@ void keen_pogo_charge(void)
 /* 0x2769: frozen by an ice block */
 void keen_frozen(void)
 {
-    cur.sprite = 0x1c + ((plat_ticks() >> 5) & 1);
+    cur.sprite = 0x1c + ((gtick >> 5) & 1);
     cur.timer -= tics;
     if (cur.timer < 0) {
         cur.sprite = 0x1f;
@@ -803,8 +906,8 @@ void keen_exit_walk(void)
 {
     int32_t tx = cur.timer, ty = cur.w2c;
     cur.dx = tics * 0x3c;
-    cur.sprite = (plat_ticks() >> 4) & 3;
-    keen_facing = cur.xv;
+    cur.sprite = (gtick >> 4) & 3;
+    plr->facing = cur.xv;
     rf_tile(tx << 12, ty << 12, 0xa0);
     rf_tile(tx << 12, (ty + 1) << 12, 0xa0);
     rf_tile((tx + 1) << 12, ty << 12, 0x8f);
@@ -824,7 +927,7 @@ void keen_dying(void)
         cur.xv = rand8() - 0x80;
         cur.yv = -400;
     }
-    cur.sprite = 0x16 + ((plat_ticks() >> 4) & 1);
+    cur.sprite = 0x16 + ((gtick >> 4) & 1);
     cur.dx = cur.xv * tics;
     cur.dy = cur.yv * tics;
     if (cur.y2 < scroll_y)
@@ -857,7 +960,7 @@ void keen_touch(obj_t *self, obj_t *o)
             self->timer = 0;
             return;
         }
-        kill_keen();
+        kill_keen(self);
         return;
     case OT_BUTLER:
     case OT_TANK:
@@ -906,7 +1009,7 @@ void think_shot(void)
     }
 }
 
-static void keenshot_touch(obj_t *self, obj_t *o)
+void keenshot_touch(obj_t *self, obj_t *o)
 {
     if (o->type != OT_KEEN && o->type != OT_DEAD)
         shot_splash_obj(self);
@@ -923,7 +1026,7 @@ static void spawn_keenshot(int32_t x, int32_t y)
     o->touch = keenshot_touch;
     o->sprite = 0x6c;
     int row = (int)(y >> 12) + 1;
-    if (keen_facing >= 0) {
+    if (plr->facing >= 0) {
         o->xv = 0x190;
         if (!T_RIGHT(tile_at((int)(x >> 12) + 1, row)))
             return;
@@ -979,7 +1082,7 @@ static void lights(int on)
 static void switch_activate(void)
 {
     snd_play(0x19);
-    if (tile_at(switch_x + 3, switch_y + 5) == 0x1df) {
+    if (tile_at(plr->switch_x + 3, plr->switch_y + 5) == 0x1df) {
         /* The switch in the castle shakes the screen and ends the level. */
         int32_t sx = scroll_x, sy = scroll_y;
         for (int i = 1; i < 0x50; i++) {
@@ -995,18 +1098,18 @@ static void switch_activate(void)
         level_result = 3;
         return;
     }
-    int t = tile_at(switch_x, switch_y);
+    int t = tile_at(plr->switch_x, plr->switch_y);
     if (t == 0x10f) {
         lights(!lights_on);
         return;
     }
     if (t == 0x1e0)
-        set_tile(switch_x, switch_y, 0x1ed);
+        set_tile(plr->switch_x, plr->switch_y, 0x1ed);
     else if (t == 0x1ed)
-        set_tile(switch_x, switch_y, 0x1e0);
-    int info = info_at(switch_x, switch_y);
-    int bx = switch_x + (int8_t)(info & 0xff);
-    int by = switch_y + (int8_t)(info >> 8);
+        set_tile(plr->switch_x, plr->switch_y, 0x1e0);
+    int info = info_at(plr->switch_x, plr->switch_y);
+    int bx = plr->switch_x + (int8_t)(info & 0xff);
+    int by = plr->switch_y + (int8_t)(info >> 8);
     int i;
     for (i = 0; i < numspecs; i++)
         if (specs[i].active && specs[i].x == bx && specs[i].y == by)
@@ -1048,13 +1151,15 @@ static void open_door(int tx, int ty)
     set_tile(tx, top + 1, 0x8f);
 }
 
-/* 0x4373: Keen touching special tiles. */
-static void keen_tiles(void)
+/* 0x4373: Keen i touching special tiles. Everything a Keen collects goes into
+ * the one shared game record `gs`, whoever touched it. */
+static void keen_tiles(int i)
 {
-    obj_t *k = &objs[0];
-    if (k->think == keen_dying)
+    obj_t *k = &objs[i];
+    cur_plr = &players[i];
+    if (k->type != OT_KEEN || k->think == keen_dying)
         return;
-    on_switch = 0;
+    plr->on_switch = 0;
     int tx1 = k->x1 >> 12, tx2 = k->x2 >> 12, ty1 = k->y1 >> 12, ty2 = k->y2 >> 12;
     for (int tx = tx1; tx <= tx2; tx++)
         for (int ty = ty1; ty <= ty2; ty++) {
@@ -1065,7 +1170,7 @@ static void keen_tiles(void)
             case -1:
                 break;
             case 1:
-                kill_keen();
+                kill_keen(k);
                 break;
             case 2: case 3: case 4: case 5:
                 if (!gs.keys[b - 2]) {
@@ -1116,15 +1221,15 @@ static void keen_tiles(void)
                 set_tile(tx, ty, cur_level == 11 ? 0x1b2 : 0x13b);
                 break;
             case 23: case 25: case 26:
-                on_switch = 1;
-                switch_x = tx;
-                switch_y = ty;
+                plr->on_switch = 1;
+                plr->switch_x = tx;
+                plr->switch_y = ty;
                 break;
             case 24:
                 level_result = 2;
                 break;
             case 27:
-                keen_invuln += 0x578;
+                plr->invuln += 0x578;
                 set_tile(tx, ty, t / 13 * 13);
                 break;
             case 28:
@@ -1153,62 +1258,114 @@ void palettes_init(void)
 /* ------------------------------------------------------------------ */
 /* 0x4C32: play one level. Returns 0 died, 1 done, 2 teleported, 3 left. */
 
-int play_level(int num)
+/* Draw Keen `slot`; with more than one player each Keen gets his colour
+ * scheme and a P1/P2 tag above him (levels and the world map). */
+void draw_keen(int32_t x, int32_t y, int sprite, int slot)
 {
-    /* Keen's old position survives (actors spawned before his start
-     * marker face him based on it, as in the original). */
-    int32_t kx = objs[0].x, ky = objs[0].y;
+    if (nplayers > 1) {
+        char tag[3] = {'P', (char)('1' + slot), 0};
+        rf_sprite_ex(x, y, sprite, slot & 1);
+        rf_label(x, y - 0x800, tag);
+        return;
+    }
+    rf_sprite(x, y, sprite);
+}
+
+static void draw_obj(const obj_t *o, int slot)
+{
+    if (slot < nplayers && o->type == OT_KEEN)
+        draw_keen(o->x, o->y, o->sprite, slot);
+    else
+        rf_sprite(o->x, o->y, o->sprite);
+}
+
+void camera_start(int i)
+{
+    player_t *p = &players[i];
+    p->cam_x = objs[i].x - 0xa000;
+    p->cam_y = objs[i].y - 0x5000;
+    if (p->cam_x < scrollmin_x) p->cam_x = scrollmin_x;
+    if (p->cam_y < scrollmin_y) p->cam_y = scrollmin_y;
+    if (p->cam_x > scrollmax_x) p->cam_x = scrollmax_x;
+    if (p->cam_y > scrollmax_y) p->cam_y = scrollmax_y;
+    p->cam_tx = p->cam_x >> 12;
+    p->cam_ty = p->cam_y >> 12;
+}
+
+/* The camera that gets drawn is the local player's. */
+static void draw_camera(void)
+{
+    scroll_x = players[local_player].cam_x;
+    scroll_y = players[local_player].cam_y;
+}
+
+static int play_level_run(int num)
+{
+    /* The Keens' old positions survive (actors spawned before the start
+     * marker face them based on it, as in the original). */
+    int32_t kx[MAXPLAYERS], ky[MAXPLAYERS];
+    for (int i = 0; i < nplayers; i++) {
+        kx[i] = objs[i].x;
+        ky[i] = objs[i].y;
+    }
     rf_hook = NULL;
     memset(objs, 0, sizeof objs);
-    objs[0].x = kx;
-    objs[0].y = ky;
     memset(specs, 0, sizeof specs);
-    objs[0].type = OT_KEEN;
-    objs[0].think = keen_walk;
-    objs[0].touch = keen_touch;
-    objs[0].sprite = 4;
-    objs[0].active = 1;
-    numobjs = 1;
+    for (int i = 0; i < nplayers; i++) {
+        obj_t *k = &objs[i];
+        k->x = kx[i];
+        k->y = ky[i];
+        k->type = OT_KEEN;
+        k->think = keen_walk;
+        k->touch = keen_touch;
+        k->sprite = 4;
+        k->active = 1;
+        players[i].facing = 1;
+        players[i].invuln = 0;
+        players[i].ctrl = players[i].ctrl_prev = (ctrl_t){8, 0, 0};
+    }
+    numobjs = nplayers;
     numspecs = 0;
-    keen_facing = 1;
     tics = 0;
-    keen_invuln = 0;
     godmode = 0;
     level_result = 0;
-    plat_set_ticks(0);
+    gtick = 0;
+    frame_no = 0;
+    plat_set_ticks(0);      /* pacing only */
     lasttick = 0;
     load_level(num);
     spawn_actors();
 
-    scroll_x = objs[0].x - 0xa000;
-    scroll_y = objs[0].y - 0x5000;
-    if (scroll_x < scrollmin_x) scroll_x = scrollmin_x;
-    if (scroll_y < scrollmin_y) scroll_y = scrollmin_y;
-    if (scroll_x > scrollmax_x) scroll_x = scrollmax_x;
-    if (scroll_y > scrollmax_y) scroll_y = scrollmax_y;
+    for (int i = 0; i < nplayers; i++)
+        camera_start(i);
+    draw_camera();
 
     frame_start();
     if (!warp_level)
         fade_out();
     lights_on = 1;
-    scroll_tx = scroll_x >> 12;
-    scroll_ty = scroll_y >> 12;
     frame_refresh();
     frame_refresh();
     fade_in();
 
     for (;;) {
         frame_start();
-        read_ctrl(&ctrl);
+        if (replaying)
+            replay_apply();
+        for (int i = 0; i < nplayers; i++)
+            read_player_ctrl(i);
+        record_frame();
         for (int i = 0; i < numobjs; i++) {
             obj_t *o = &objs[i];
             if (!o->type)
                 continue;
             cur = *o;
+            if (i < nplayers)
+                cur_plr = &players[i];
             if (!cur.active) {
                 int tx = cur.x >> 12, ty = cur.y >> 12;
-                if (scroll_tx - 2 < tx && scroll_ty - 2 < ty && tx < scroll_tx + 0x17 &&
-                    ty < scroll_ty + 0xc) {
+                /* Wakes when it enters any player's camera view. */
+                if (cam_sees(tx, ty, 2, 2, 0x17, 0xc)) {
                     cur.active = 1;
                     if (cur.think == yorp_stunned) {
                         cur.think = yorp_look;
@@ -1221,7 +1378,7 @@ int play_level(int num)
                     cur.y += cur.dy;
                     calc_hitbox();
                 }
-            } else if (i == 0 || !obj_offscreen()) {
+            } else if (i < nplayers || !obj_offscreen()) {
                 calc_hitbox();
                 cur.dx = cur.dy = 0;
                 cur.think();
@@ -1231,7 +1388,8 @@ int play_level(int num)
             }
             *o = cur;
         }
-        scroll_follow();
+        for (int i = 0; i < nplayers; i++)
+            scroll_follow(i);
         for (int i = 0; i < numobjs; i++) {
             obj_t *a = &objs[i];
             if (!a->type || !a->active)
@@ -1244,23 +1402,37 @@ int play_level(int num)
                 }
             }
         }
-        scroll_tx = scroll_x >> 12;
-        scroll_ty = scroll_y >> 12;
+        for (int i = 0; i < nplayers; i++) {
+            players[i].cam_tx = players[i].cam_x >> 12;
+            players[i].cam_ty = players[i].cam_y >> 12;
+        }
+        draw_camera();
         for (int i = numobjs - 1; i >= 0; i--)
             if (objs[i].type && objs[i].active)
-                rf_sprite(objs[i].x, objs[i].y, objs[i].sprite);
-        keen_tiles();
+                draw_obj(&objs[i], i);
+        for (int i = 0; i < nplayers; i++)
+            keen_tiles(i);
         for (int i = 0; i < numspecs; i++)
             if (specs[i].active)
                 specs[i].think(&specs[i]);
         frame_refresh();
-        ctrl_prev = ctrl;
-        check_cheats();
-        if (check_hotkeys())
-            reset_frame_time();
+        for (int i = 0; i < nplayers; i++)
+            players[i].ctrl_prev = players[i].ctrl;
+        frame_no++;
+        replay_frame_end();
+        if (!replaying) {
+            check_cheats();
+            if (check_hotkeys())
+                reset_frame_time();
+        }
         if (abort_game)
             return 0;
-        if (level_result || objs[0].type == 0) {
+        int alive = 0;
+        for (int i = 0; i < nplayers; i++)
+            alive |= objs[i].type != 0;
+        if (replaying && replay_level_done())
+            return 3;
+        if (level_result || !alive) {
             snd_wait();
             fade_out();
             for (int k = 0; k < 4; k++)
@@ -1278,4 +1450,22 @@ int play_level(int num)
             return level_result;
         }
     }
+}
+
+/* Every level starts its random generator from a seed: the game seed and the
+ * count of levels started, or the seed a replay prescribes. */
+uint32_t game_seed;
+extern uint32_t level_seed_override;
+extern int level_seed_set;
+
+int play_level(int num)
+{
+    static uint32_t levels_started;
+    uint32_t seed = level_seed_set ? level_seed_override
+                                   : game_seed + 0x9e3779b1u * ++levels_started;
+    rng_seed(seed);
+    record_level_begin(num, seed);
+    int r = play_level_run(num);
+    record_level_end();
+    return r;
 }

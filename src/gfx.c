@@ -20,8 +20,23 @@ void (*rf_hook)(void);
 
 /* Draw lists, filled between rf_begin() and rf_refresh(). */
 #define MAXRF 512
-static struct { int px, py, n; } rf_sprites[MAXRF], rf_tiles[MAXRF];
+static struct { int px, py, n, remap; } rf_sprites[MAXRF], rf_tiles[MAXRF];
 static int n_rf_sprites, n_rf_tiles;
+#define MAXLABELS 16
+static struct { int px, py; char text[4]; } rf_labels[MAXLABELS];
+static int n_rf_labels;
+
+/* Second colour scheme for player 2's Keen (EGA palette registers): helmet
+ * yellow -> green, sweater magenta -> cyan, trousers blue -> red. */
+static uint8_t remap_p2[16];
+static void remap_init(void)
+{
+    for (int i = 0; i < 16; i++)
+        remap_p2[i] = (uint8_t)i;
+    remap_p2[0xe] = 0xa;
+    remap_p2[0xd] = 0xb;
+    remap_p2[0x9] = 0xc;
+}
 
 static void planar(const uint8_t *planes, long planesize, long off, int wbytes, int h,
                    uint8_t *pix, uint8_t *mask)
@@ -127,11 +142,13 @@ static void put_tile(int px, int py, int tile)
     }
 }
 
-static void put_sprite(int px, int py, int n)
+static void put_sprite(int px, int py, int n, int remap)
 {
     if (n < 0 || n >= NUMSPRITES)
         return;
     const sprite_t *s = &sprites[n];
+    if (!remap_p2[0xe])
+        remap_init();
     for (int y = 0; y < s->h; y++) {
         int sy = py + y;
         if (sy < 0 || sy >= SCR_H)
@@ -140,7 +157,7 @@ static void put_sprite(int px, int py, int n)
             int sx = px + x;
             int i = y * s->w + x;
             if (sx >= 0 && sx < SCR_W && !s->mask[i])
-                screen[sy * SCR_W + sx] = s->pix[i];
+                screen[sy * SCR_W + sx] = remap ? remap_p2[s->pix[i]] : s->pix[i];
         }
     }
 }
@@ -190,7 +207,7 @@ void draw_tile_at(int col, int y, int tile)
 /* n is sprite*4 + shift, shift being a 2 pixel offset. */
 void draw_sprite_at(int col, int y, int n)
 {
-    put_sprite(col * 8 - 32 - fine_x() + (n & 3) * 2, y, n >> 2);
+    put_sprite(col * 8 - 32 - fine_x() + (n & 3) * 2, y, n >> 2, 0);
 }
 
 void scroll_text_area(int toprow, int botrow, int up)
@@ -213,6 +230,7 @@ void rf_begin(void)
 {
     n_rf_sprites = 0;
     n_rf_tiles = 0;
+    n_rf_labels = 0;
 }
 
 static int map_tile(int tx, int ty)
@@ -223,6 +241,26 @@ static int map_tile(int tx, int ty)
 }
 
 int rf_sprite(int32_t x, int32_t y, int sprite)
+{
+    return rf_sprite_ex(x, y, sprite, 0);
+}
+
+/* A short text label (opaque font glyphs) at a world position. */
+void rf_label(int32_t x, int32_t y, const char *text)
+{
+    int sx = (int)(x / 256) - (int)((scroll_x / 256) & ~15);
+    int sy = (int)(y / 256) - (int)((scroll_y / 256) & ~15);
+    if (sx < -32 || sy < -32 || sx > 0x150 || sy > 199 || n_rf_labels >= MAXLABELS)
+        return;
+    rf_labels[n_rf_labels].px = sx;
+    rf_labels[n_rf_labels].py = sy;
+    strncpy(rf_labels[n_rf_labels].text, text, 3);
+    rf_labels[n_rf_labels].text[3] = 0;
+    n_rf_labels++;
+}
+
+/* remap: 0 as drawn, 1 player 2's colour scheme. */
+int rf_sprite_ex(int32_t x, int32_t y, int sprite, int remap)
 {
     int sx = (int)(x / 256) - (int)((scroll_x / 256) & ~15);
     int sy = (int)(y / 256) - (int)((scroll_y / 256) & ~15);
@@ -268,6 +306,7 @@ int rf_sprite(int32_t x, int32_t y, int sprite)
         rf_sprites[n_rf_sprites].px = sx & ~1;
         rf_sprites[n_rf_sprites].py = sy;
         rf_sprites[n_rf_sprites].n = sprite;
+        rf_sprites[n_rf_sprites].remap = remap;
         n_rf_sprites++;
     }
     return 1;
@@ -292,6 +331,7 @@ void rf_refresh(void)
 {
     int fx = fine_x(), fy = fine_y();
     int stx = (int)(scroll_x >> 12), sty = (int)(scroll_y >> 12);
+    /* drawing only: tile animation does not touch the game state */
     int frame = ((plat_ticks() >> anim_shift) & 6) / 2;
     for (int ty = 0; ty < 14; ty++)
         for (int tx = 0; tx < 21; tx++) {
@@ -299,9 +339,21 @@ void rf_refresh(void)
             put_tile(tx * 16 - fx, ty * 16 - fy, tile_gfx(t, frame));
         }
     for (int i = 0; i < n_rf_sprites; i++)
-        put_sprite(rf_sprites[i].px - fx, rf_sprites[i].py - fy, rf_sprites[i].n);
+        put_sprite(rf_sprites[i].px - fx, rf_sprites[i].py - fy, rf_sprites[i].n,
+                   rf_sprites[i].remap);
     for (int i = 0; i < n_rf_tiles; i++)
         put_tile(rf_tiles[i].px - fx, rf_tiles[i].py - fy, tile_gfx(rf_tiles[i].n, frame));
+    for (int i = 0; i < n_rf_labels; i++)
+        for (int c = 0; rf_labels[i].text[c]; c++) {
+            const uint8_t *g = font[(uint8_t)rf_labels[i].text[c]];
+            int px = rf_labels[i].px - fx + c * 8, py = rf_labels[i].py - fy;
+            for (int yy = 0; yy < 8; yy++)
+                for (int xx = 0; xx < 8; xx++) {
+                    int sx = px + xx, sy = py + yy;
+                    if (sx >= 0 && sx < SCR_W && sy >= 0 && sy < SCR_H)
+                        screen[sy * SCR_W + sx] = g[yy * 8 + xx];
+                }
+        }
     if (rf_hook)
         rf_hook();
     plat_vsync(1);

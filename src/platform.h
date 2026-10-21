@@ -11,6 +11,10 @@
 extern uint8_t screen[SCR_W * SCR_H];
 
 int plat_init(int scale, int fullscreen);
+/* Headless: no window, audio or real-time pacing (replay tests). Set before
+ * plat_init(); plat_ticks() then follows a virtual clock driven by plat_vsync(). */
+void plat_set_headless(int on);
+int plat_headless(void);
 void plat_shutdown(void);
 
 /* EGA attribute controller palette: 16 colour registers + overscan. */

@@ -1,0 +1,11 @@
+# One player walking right and jumping in level 1. Used by the snapshot self-test
+# (needs at least 600 frames).
+seed 42
+players 1
+level 1
+0 1 2 0 0
+60 1 2 1 0
+80 1 2 0 0
+150 1 2 1 0
+170 1 2 0 0
+end 700

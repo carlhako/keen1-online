@@ -677,7 +677,7 @@ void title_loop(void)
 /* World map */
 
 static struct { int x, y, wide; } level_pos[17];
-static int32_t map_x, map_y, map_sx, map_sy;   /* DS:A226.. working copy */
+static int32_t map_sx, map_sy;      /* DS:A226.. working copy of the map scroll */
 
 /* 0x826D: locate the level entrances on the map. */
 static void find_levels(void)
@@ -797,7 +797,7 @@ static void wait_buttons_up_map(obj_t *k)
     do {
         frame_start();
         read_ctrl(&c);
-        rf_sprite(k->x, k->y, k->sprite);
+        draw_keen(k->x, k->y, k->sprite, player_of(k));
         frame_refresh();
         check_cheats();
         check_hotkeys();
@@ -849,10 +849,13 @@ static int map_special(int sel, obj_t *k, int lx, int ly)
         int32_t ty = ds_w(0x2856 + dst * 10) | (int32_t)ds_w(0x2858 + dst * 10) << 16;
         snd_play(0x12);
         teleport_anim(lx, ly, ds_w(0x285a + src * 10));
-        k->x = map_x = tx;
-        k->y = map_y = ty;
-        scroll_x = k->x - 0x9000;
-        scroll_y = k->y - 0x3000;
+        int pi = player_of(k);
+        k->x = players[pi].map_x = tx;
+        k->y = players[pi].map_y = ty;
+        if (pi == local_player) {
+            scroll_x = k->x - 0x9000;
+            scroll_y = k->y - 0x3000;
+        }
         teleport_anim(k->x / 0x1000, k->y / 0x1000, ds_w(0x285a + dst * 10));
         wait_buttons_up_map(k);
         return 1;
@@ -861,9 +864,12 @@ static int map_special(int sel, obj_t *k, int lx, int ly)
 }
 
 /* 0xAC1C: Keen walking on the world map. */
-static void map_keen(const ctrl_t *c, obj_t *k)
+static void map_keen(int pi)
 {
-    static int lx, ly;
+    static int lxs[MAXPLAYERS], lys[MAXPLAYERS];
+    int *lxp = &lxs[pi], *lyp = &lys[pi];
+    obj_t *k = &objs[pi];
+    const ctrl_t *c = &players[pi].ctrl;
     calc_hitbox_obj(k);
     if (c->b1 || c->b2) {
         int tx1 = k->x1 / 0x1000, tx2 = k->x2 / 0x1000;
@@ -871,8 +877,8 @@ static void map_keen(const ctrl_t *c, obj_t *k)
         for (int tx = tx1; tx <= tx2; tx++)
             for (int ty = ty1; ty <= ty2; ty++)
                 if (MAPI(tx, ty)) {
-                    lx = tx;
-                    ly = ty;
+                    *lxp = tx;
+                    *lyp = ty;
                     sel_level = MAPI(tx, ty);
                     if (sel_level == 0xff)
                         sel_level = 0;
@@ -889,7 +895,7 @@ static void map_keen(const ctrl_t *c, obj_t *k)
     case 6: k->dx = -0x400; k->sprite = 0x28; break;
     case 7: k->dy = -0x400; k->dx = -0x400; k->sprite = 0x2c; break;
     }
-    uint32_t tick = plat_ticks();
+    uint32_t tick = gtick;
     int moving = k->dx || k->dy;
     int frame = moving ? (tick >> 4) & 3 : 0;
     block_mask = 0x8000;
@@ -900,29 +906,30 @@ static void map_keen(const ctrl_t *c, obj_t *k)
     k->y += k->dy;
     if (moving && ((tick >> 3) & 3) == 0)
         snd_play(blocked ? 2 : 1);
-    int32_t kx = k->x - scroll_x, ky = k->y - scroll_y;
-    if (k->dx > 0 && kx > 0xb000) {
-        scroll_x += k->dx;
-        if (scroll_x > scrollmax_x)
-            scroll_x = scrollmax_x;
-    } else if (k->dx < 0 && kx < 0x9000) {
-        scroll_x += k->dx;
-        if (scroll_x < scrollmin_x)
-            scroll_x = scrollmin_x;
+    /* The map scrolls to follow the local player only. */
+    if (pi == local_player) {
+        int32_t kx = k->x - scroll_x, ky = k->y - scroll_y;
+        if (k->dx > 0 && kx > 0xb000) {
+            scroll_x += k->dx;
+            if (scroll_x > scrollmax_x)
+                scroll_x = scrollmax_x;
+        } else if (k->dx < 0 && kx < 0x9000) {
+            scroll_x += k->dx;
+            if (scroll_x < scrollmin_x)
+                scroll_x = scrollmin_x;
+        }
+        if (k->dy > 0 && ky > 0x7000) {
+            scroll_y += k->dy;
+            if (scroll_y > scrollmax_y)
+                scroll_y = scrollmax_y;
+        } else if (k->dy < 0 && ky < 0x3000) {
+            scroll_y += k->dy;
+            if (scroll_y < scrollmin_y)
+                scroll_y = scrollmin_y;
+        }
     }
-    if (k->dy > 0 && ky > 0x7000) {
-        scroll_y += k->dy;
-        if (scroll_y > scrollmax_y)
-            scroll_y = scrollmax_y;
-    } else if (k->dy < 0 && ky < 0x3000) {
-        scroll_y += k->dy;
-        if (scroll_y < scrollmin_y)
-            scroll_y = scrollmin_y;
-    }
-    scroll_tx = scroll_x >> 12;
-    scroll_ty = scroll_y >> 12;
-    rf_sprite(k->x, k->y, k->sprite + frame);
-    if (sel_level && map_special(sel_level, k, lx, ly))
+    draw_keen(k->x, k->y, k->sprite + frame, pi);
+    if (sel_level && map_special(sel_level, k, *lxp, *lyp))
         sel_level = 0;
 }
 
@@ -931,13 +938,16 @@ static void level_teleport(void)
 {
     load_level(0x50);
     snd_play(0x12);
-    obj_t *k = &objs[0];
-    k->dx = k->dy = k->xv = k->yv = 0;
-    k->sprite = 0x24;
     int32_t tx = ds_w(0x2866) | (int32_t)ds_w(0x2868) << 16;
     int32_t ty = ds_w(0x286a) | (int32_t)ds_w(0x286c) << 16;
-    k->x = map_x = tx;
-    k->y = map_y = ty;
+    for (int i = 0; i < nplayers; i++) {
+        obj_t *k = &objs[i];
+        k->dx = k->dy = k->xv = k->yv = 0;
+        k->sprite = 0x24;
+        k->x = players[i].map_x = tx;
+        k->y = players[i].map_y = ty;
+    }
+    obj_t *k = &objs[local_player];
     scroll_x = tx - 0x9000;
     scroll_y = ty - 0x3000;
     frame_start();
@@ -1246,11 +1256,9 @@ static void game_over(void)
 }
 
 /* 0x7DFB: the world map and the game. */
-void play_game(void)
+void game_setup(void)
 {
-    int result = 0;
     rf_hook = NULL;
-    flush_input();
     load_level(0x50);
     if (!game_loaded) {
         for (int ty = 0; ty < map_h; ty++)
@@ -1267,16 +1275,27 @@ void play_game(void)
     }
     map_sx = gs.mapsx;
     map_sy = gs.mapsy;
-    map_x = gs.mapx;
-    map_y = gs.mapy;
+    for (int i = 0; i < nplayers; i++) {
+        players[i].map_x = gs.mapx;
+        players[i].map_y = gs.mapy;
+    }
     block_mask = 0x8000;
     last_extra = gs.score / 20000 * 20000;
     abort_game = 0;
     anim_shift = 3;
+}
+
+void play_game(void)
+{
+    int result = 0;
+    flush_input();
+    game_setup();
     do {
-        obj_t *k = &objs[0];
-        k->dx = k->dy = k->xv = k->yv = 0;
-        k->sprite = 0x24;
+        for (int i = 0; i < nplayers; i++) {
+            obj_t *k = &objs[i];
+            k->dx = k->dy = k->xv = k->yv = 0;
+            k->sprite = 0x24;
+        }
         sel_level = 0;
         load_level(0x50);
         find_levels();
@@ -1295,8 +1314,10 @@ void play_game(void)
                 MAPT(x + 1, y + 1) = 0x51;
             }
         }
-        k->x = map_x;
-        k->y = map_y;
+        for (int i = 0; i < nplayers; i++) {
+            objs[i].x = players[i].map_x;
+            objs[i].y = players[i].map_y;
+        }
         scroll_x = map_sx;
         scroll_y = map_sy;
         if (!warp_level) {
@@ -1325,16 +1346,20 @@ void play_game(void)
             reset_frame_time();
             do {
                 frame_start();
-                read_ctrl(&ctrl);
-                map_keen(&ctrl, k);
+                for (int i = 0; i < nplayers; i++) {
+                    read_player_ctrl(i);
+                    map_keen(i);
+                }
                 frame_refresh();
                 check_cheats();
-                map_x = k->x;
-                map_y = k->y;
+                for (int i = 0; i < nplayers; i++) {
+                    players[i].map_x = objs[i].x;
+                    players[i].map_y = objs[i].y;
+                }
                 map_sx = scroll_x;
                 map_sy = scroll_y;
-                gs.mapx = map_x;
-                gs.mapy = map_y;
+                gs.mapx = players[0].map_x;
+                gs.mapy = players[0].map_y;
                 gs.mapsx = map_sx;
                 gs.mapsy = map_sy;
                 if (check_hotkeys())

@@ -69,7 +69,29 @@ extern gamestate_t gs;
 typedef struct {
     int16_t dir, b1, b2;
 } ctrl_t;
-extern ctrl_t ctrl, ctrl_prev;
+
+/* One player. Keens occupy object slots 0..nplayers-1 (slot i is player i),
+ * so "Keen thinks first and is drawn on top" still holds. Everything here
+ * except `input` is game state: it goes into snapshots and checksums. */
+#define MAXPLAYERS 4
+enum { IN_KEYS1, IN_KEYS2, IN_REPLAY };    /* where a player's input comes from */
+typedef struct {
+    int32_t facing;                 /* was keen_facing */
+    int32_t invuln;                 /* was keen_invuln */
+    ctrl_t ctrl, ctrl_prev;         /* this frame's and last frame's input */
+    int32_t cam_x, cam_y;           /* camera (level or map), 1/256 pixel */
+    int32_t cam_tx, cam_ty;         /* camera in tiles, as seen by the last frame */
+    int32_t map_x, map_y;           /* world map position */
+    int32_t on_switch, switch_x, switch_y;
+    int32_t input;                  /* IN_*; not part of the game state */
+} player_t;
+
+extern player_t players[MAXPLAYERS];
+extern int nplayers;
+extern int local_player;            /* whose camera is drawn */
+extern player_t *cur_plr;           /* the player whose Keen is thinking */
+extern uint32_t gtick;              /* game time in ticks; replaces the wall clock */
+extern uint32_t frame_no;           /* simulated frames since the level started */
 
 /* Engine state */
 extern int tics;
@@ -78,20 +100,30 @@ extern int numobjs;
 extern spec_t specs[MAXSPECS];
 extern int numspecs;
 extern int cur_level;
-extern int scroll_tx, scroll_ty;
 extern int32_t scrollmin_x, scrollmin_y, scrollmax_x, scrollmax_y;
 extern int32_t objmax_x, objmax_y, keenmax_x, keendeath_y;
-extern int keen_facing, lights_on, keen_invuln, on_switch, switch_x, switch_y;
+extern int lights_on;
 extern int level_result, godmode, abort_game, warp_level;
 extern int32_t last_extra;
 extern int in_world_map;
+
+/* Fixed simulation step: 6 ticks (timer rate 1193182/8192 Hz), about 24.3 frames/s. */
+#define SIM_TICS 6
 
 /* engine.c */
 void frame_start(void);
 void frame_refresh(void);
 void load_level(int num);
 int play_level(int num);
-void read_ctrl(ctrl_t *c);
+void read_ctrl(ctrl_t *c);                          /* key set 1, for menus */
+void read_player_ctrl(int p);                       /* this frame's input of player p */
+void rng_init(void);
+void rng_seed(uint32_t seed);
+obj_t *nearest_keen(void);                          /* nearest living Keen to cur */
+int player_of(const obj_t *o);                      /* player number of a Keen object, or -1 */
+void camera_start(int p);                           /* centre player p's camera on his Keen */
+void draw_keen(int32_t x, int32_t y, int sprite, int slot);
+int cam_sees(int tx, int ty, int l, int t, int r, int b);
 int tile_at(int tx, int ty);
 void set_tile(int tx, int ty, int t);
 obj_t *new_obj(void);
@@ -103,7 +135,7 @@ void gravity(void);
 int move_obj(void);
 int clip_move(void);
 void add_score(int pts);
-void kill_keen(void);
+void kill_keen(obj_t *k);
 int rand8(void);
 int rand_range(int max);
 void think_none(void);
@@ -115,6 +147,34 @@ void think_dying(void);
 void think_dead(void);
 int check_hotkeys(void);
 void check_cheats(void);
+
+/* Think/touch/special function ids, so snapshots do not hold pointers (sim.c). */
+int think_id(think_t f);
+think_t think_from_id(int id);
+int touch_id(touch_t f);
+touch_t touch_from_id(int id);
+int spec_think_id(void (*f)(spec_t *));
+void (*spec_think_from_id(int id))(spec_t *);
+
+/* sim.c: snapshots, checksums, replay */
+size_t sim_save(uint8_t **buf);                     /* *buf is owned by sim.c */
+int sim_restore(const uint8_t *buf, size_t len);
+uint32_t sim_checksum(void);
+extern int replaying;                               /* running from a recording */
+int replay_load(const char *path);
+void replay_apply(void);                            /* set this frame's inputs */
+int replay_level_done(void);                        /* recorded frames used up */
+int checksums_open(const char *path);
+int replay_run(int selftest);
+void replay_frame_end(void);                        /* per-frame hook: checksum, selftest */
+void record_open(const char *path, int level);
+void record_level_begin(int level, uint32_t seed);
+void record_level_end(void);
+extern uint32_t game_seed;
+void record_frame(void);
+void record_close(void);
+extern int headless_delay_ms;
+void sim_dump_at_exit(void);
 
 /* actors.c */
 void spawn_actors(void);
@@ -153,6 +213,7 @@ extern int key_get(void);
 
 /* menus.c */
 void title_loop(void);
+void game_setup(void);              /* start of a game: map position, scores */
 void play_game(void);
 void save_game_prompt(void);
 int load_game_prompt(void);

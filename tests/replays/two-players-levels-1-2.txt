@@ -1,0 +1,40 @@
+# Two players through levels 1 and 2. Both walk right with jumps; at frame 120 they are
+# moved next to the exit door (warp is a test aid) and the level ends when one walks in.
+seed 2024
+players 2
+level 1
+0 1 8 0 0
+5 1 2 0 0
+30 1 2 1 0
+45 1 2 0 0
+65 1 2 0 0
+90 1 2 1 0
+105 1 2 0 0
+0 2 8 0 0
+15 2 2 0 0
+40 2 2 1 0
+55 2 2 0 0
+75 2 2 0 0
+100 2 2 1 0
+115 2 2 0 0
+warp 120 1 113 8
+warp 124 2 113 8
+end 400
+level 2
+0 1 8 0 0
+5 1 2 0 0
+30 1 2 1 0
+45 1 2 0 0
+65 1 2 0 0
+90 1 2 1 0
+105 1 2 0 0
+0 2 8 0 0
+15 2 2 0 0
+40 2 2 1 0
+55 2 2 0 0
+75 2 2 0 0
+100 2 2 1 0
+115 2 2 0 0
+warp 120 1 17 5
+warp 124 2 17 5
+end 400

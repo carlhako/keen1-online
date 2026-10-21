@@ -145,6 +145,120 @@ directory that is loaded before the game starts and flushed after every write.
 The browser-specific code is behind `#ifdef __EMSCRIPTEN__` in `src/`; the page and
 storage setup are in `web/shell.html` and `web/pre.js`.
 
+## Deterministic simulation and replays
+
+keen1-online runs the game as a deterministic simulation, so that two machines given the
+same inputs play the same game. The rules the game code follows:
+
+- **Fixed step.** Every simulated frame advances the game by 6 timer ticks (about 24.3
+  frames per second, the speed the original runs at on a modern machine). Real time only
+  paces drawing; a slow machine slows the game down instead of taking bigger steps.
+- **No wall clock in game logic.** Nothing that affects the game reads `plat_ticks()`.
+  Animation frames that pick sprites (and so hitboxes) use the game tick counter `gtick`.
+  `plat_ticks()` is left to pacing, fades, sound and drawing effects, and each such use
+  has a comment saying so.
+- **All randomness from the game RNG.** `rand8()` and `rand_range()` draw from a state
+  that is part of the game state. Every level starts it from a seed (`--seed N` sets the
+  game seed; a replay carries its own).
+- **State can be saved and summarised.** `sim_save()` / `sim_restore()` capture and
+  restore objects, special objects, both level planes, the shared game record, the
+  players with their cameras, the RNG and the frame counters. `sim_checksum()` is an
+  FNV-1a hash of that snapshot, computed every frame. Think/touch function pointers are
+  written as ids from a registry in `src/sim.c`; a new think function must be added there
+  (the game aborts with a message if one is missing).
+
+### Replays
+
+A replay is a text file of per-frame inputs. It runs headless (no window or sound, as
+fast as possible):
+
+```
+./keen1 --data shareware/data --replay tests/replays/two-players-levels-1-2.txt --checksums out.txt
+```
+
+`--checksums FILE` works for any run, not only replays; it writes one 8-digit hex
+checksum per simulated frame. Two runs with the same replay (and seed) must produce
+identical files, whatever the real-time speed: `--frame-delay 1` sleeps 1 ms per frame
+to show it. `--record FILE` writes the inputs of a normal game in the same format, and
+`--dump-objs` lists the objects when the game exits.
+
+The format, one item per line (`#` starts a comment):
+
+| Line | Meaning |
+|------|---------|
+| `seed N` | random seed for the levels that follow |
+| `players N` | number of players (1 to 4) |
+| `level N` | start a segment: play level N |
+| `F P DIR B1 B2` | from frame F of the segment, player P (1-based) holds direction DIR (0-7 clockwise from up, 8 none) and buttons B1 (jump) and B2 (pogo; both = fire) until the next line for that player |
+| `ammo N` | test aid: the segment starts with N raygun charges |
+| `warp F P X Y` | test aid: at frame F put player P's Keen at tile X,Y |
+| `end F` | the segment stops after F frames (without it, when the level ends) |
+
+Frames count from 0 at the start of each level. A recorded game replays to the same
+checksums as the run that recorded it.
+
+### Tests
+
+```
+make test                  # needs shareware/data and ./keen1
+source ~/tools/emsdk/emsdk_env.sh && make node   # optional: the WebAssembly build for Node
+```
+
+`tests/run.sh` checks the snapshot/restore self-test (`--selftest FILE`: snapshot at
+frame 300, run to 600, restore, run again and compare every frame; also that a changed
+object field, tile, RNG word or tick changes the checksum), that results do not depend
+on real time, that a recorded two-player game replays to the same checksums, and, if
+`make node` has been run, that the WebAssembly build gives the same checksums as the
+native build (`node build/node/keen1.js --data shareware/data --replay FILE ...`).
+
+## Two players on one screen
+
+The engine carries up to 4 Keens (`MAXPLAYERS`); the first two-player work uses 2. Each
+Keen has his own input, facing, invulnerability timer, camera and world-map position.
+Enemies react to the nearest living Keen, objects wake when any player's camera sees them,
+hazards, pickups, doors, switches and the exit react to whichever Keen touches them (what
+is collected goes into the one shared game record), Keens pass through each other and
+their shots pass through each other. With more than one player, player 2's Keen is drawn
+in a second colour scheme (green helmet) and each Keen carries a P1/P2 tag, in levels and
+on the world map.
+
+For development, `--local2` starts a two-player game in one window; the screen follows
+player 1:
+
+```
+./keen1 --data shareware/data --local2 --level 1     # straight into level 1
+./keen1 --data shareware/data --local2               # from the title screen: both Keens on the map
+```
+
+Player 1 uses the normal keys. Player 2 uses
+
+| Key | Action |
+|-----|--------|
+| W, S, A, D | up, down, left, right |
+| Q, E, Z, C | diagonals (up-left, up-right, down-left, down-right) |
+| V | jump |
+| B | pogo stick (V + B together fire the raygun) |
+
+The cheat keys (C+T+Space, G+O+D) read the keyboard directly, so C and D double as P2
+movement keys in this mode.
+
+The `KEEN_SCRIPT` test harness (frame-timed key events, run with
+`SDL_VIDEODRIVER=dummy` for headless runs) takes an optional player number on `down` and
+`up` lines. A scancode with a player number names a key of player 1's key set and is
+translated to the same key of that player's set, so a script written for player 1 also
+drives player 2:
+
+```
+25 down 4d        # right arrow: player 1 walks right
+25 down 4d 2      # the same key for player 2 (D): player 2 walks right
+50 up 4d 2
+```
+
+```
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy KEEN_SCRIPT=tests/scripts/two-players-level1.txt \
+    ./keen1 --data shareware/data --level 1 --seed 7 --local2 --checksums out.txt
+```
+
 ## Controls
 
 | Key | Action |

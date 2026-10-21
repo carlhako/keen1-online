@@ -1,0 +1,7 @@
+# KEEN_SCRIPT for a local two-player game of level 1 (frames count presents).
+# "down 4d" is the right arrow (player 1); "down 4d 2" presses player 1's "right"
+# key as player 2's key set has it (D).
+25 down 4d
+25 down 4d 2
+50 up 4d 2
+90 quit

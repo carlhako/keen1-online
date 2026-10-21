@@ -69,7 +69,25 @@ $(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/shell.html $(wildcard $(WEB
 	mkdir -p $(WEB_OUT)
 	$(EMCC) $(WEB_FLAGS) -o $@ $(SRC) --preload-file $(WEB_DATA)@/data
 
+# Headless WebAssembly build for Node: runs replays (--replay) so their
+# checksums can be compared with the native build's. Real files via NODERAWFS.
+NODE_OUT := build/node
+NODE_FLAGS := -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -DKEEN_NODE -sUSE_SDL=2 \
+	-sASYNCIFY -sASYNCIFY_STACK_SIZE=65536 -sSTACK_SIZE=1MB -sALLOW_MEMORY_GROWTH \
+	-sENVIRONMENT=node -sNODERAWFS -sEXIT_RUNTIME
+
+node: $(NODE_OUT)/keen1.js
+
+$(NODE_OUT)/keen1.js: $(SRC) src/*.h
+	mkdir -p $(NODE_OUT)
+	$(EMCC) $(NODE_FLAGS) -o $@ $(SRC)
+
+# Determinism tests: snapshot/restore self-test, real-time independence and
+# (when the Node build exists) native-vs-wasm checksums. Needs shareware/data.
+test: keen1
+	tests/run.sh
+
 clean:
 	rm -rf build keen1 $(DIST) $(DIST).tar.gz
 
-.PHONY: dist web clean
+.PHONY: dist web node test clean

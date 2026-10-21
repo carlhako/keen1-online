@@ -21,6 +21,20 @@ static uint32_t rgb[16];
 static uint32_t border_rgb;
 static uint64_t perf_freq, perf_base;
 static int64_t tick_adjust;
+static int headless;
+static int64_t virt_ticks;      /* headless clock, in 1/70 s steps scaled to ticks */
+static double virt_frac;
+
+void plat_set_headless(int on) { headless = on; }
+int plat_headless(void) { return headless; }
+
+static void virt_advance(double seconds)
+{
+    virt_frac += seconds * TICK_HZ;
+    int64_t whole = (int64_t)virt_frac;
+    virt_ticks += whole;
+    virt_frac -= (double)whole;
+}
 
 /* In the 200-line EGA mode the game uses, a palette register value is
  * interpreted as RGB in bits 0-2 and intensity in bit 4 (CGA colours). */
@@ -133,6 +147,8 @@ static void push_key(uint16_t k)
 
 void plat_pump(void)
 {
+    if (headless)
+        return;
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
         switch (ev.type) {
@@ -188,12 +204,21 @@ int plat_bioskey(int peek)
 
 static int64_t raw_ticks(void)
 {
+    if (headless)
+        return virt_ticks;
     return (int64_t)((double)(SDL_GetPerformanceCounter() - perf_base) * TICK_HZ /
                      (double)perf_freq);
 }
 
 void plat_delay(int ms)
 {
+    if (headless) {
+        /* a real delay when asked, so tests can vary real time */
+        virt_advance(ms / 1000.0);
+        if (ms > 0 && headless > 1)
+            SDL_Delay((uint32_t)ms);
+        return;
+    }
 #ifdef __EMSCRIPTEN__
     emscripten_sleep((unsigned)ms);
 #else
@@ -212,8 +237,27 @@ void plat_set_ticks(uint32_t t)
 }
 
 /* ------------------------------------------------------------------ */
-/* Debug scripting: KEEN_SCRIPT=file with lines "<frame> down|up <scancode>",
- * "<frame> shot <file.png>", "<frame> quit". Frames count presents. */
+/* Debug scripting: KEEN_SCRIPT=file with lines "<frame> down|up <scancode> [player]",
+ * "<frame> shot <file.png>", "<frame> quit". Frames count presents.
+ * With a player number, the scancode names a key of player 1's key set and
+ * is translated to the same key of that player's set (so a script written for
+ * player 1 also drives player 2). */
+extern uint8_t key_dir[8], key_b1, key_b2;
+extern const uint8_t key2_dir[8], key2_b1, key2_b2;
+
+static int script_key(int sc, int player)
+{
+    if (player < 2)
+        return sc & 0x7f;
+    for (int i = 0; i < 8; i++)
+        if (sc == key_dir[i])
+            return key2_dir[i];
+    if (sc == key_b1)
+        return key2_b1;
+    if (sc == key_b2)
+        return key2_b2;
+    return sc & 0x7f;
+}
 
 static FILE *script;
 static long script_frame;
@@ -319,13 +363,14 @@ static void script_step(void)
         }
         if (next_frame > script_frame)
             return;
-        int sc;
+        int sc, pl = 0;
         char arg[256];
-        if (sscanf(next_cmd, "down %x", &sc) == 1) {
-            keydown[sc & 0x7f] = 1;
-            push_key((uint16_t)((sc & 0x7f) << 8 | (sc == 0x1c ? 13 : sc == 0x39 ? 32 : 0)));
-        } else if (sscanf(next_cmd, "up %x", &sc) == 1) {
-            keydown[sc & 0x7f] = 0;
+        if (sscanf(next_cmd, "down %x %d", &sc, &pl) >= 1) {
+            int k = script_key(sc, pl);
+            keydown[k] = 1;
+            push_key((uint16_t)(k << 8 | (sc == 0x1c ? 13 : sc == 0x39 ? 32 : 0)));
+        } else if (sscanf(next_cmd, "up %x %d", &sc, &pl) >= 1) {
+            keydown[script_key(sc, pl)] = 0;
         } else if (sscanf(next_cmd, "key %x %255s", &sc, arg) == 2) {
             push_key((uint16_t)((sc & 0x7f) << 8 | (uint8_t)arg[0]));
         } else if (sscanf(next_cmd, "shot %255s", arg) == 1) {
@@ -342,6 +387,8 @@ void plat_present(void)
 {
     uint32_t *pix;
     int pitch;
+    if (headless)
+        return;
     script_step();
     if (SDL_LockTexture(tex, NULL, (void **)&pix, &pitch) == 0) {
         for (int y = 0; y < SCR_H; y++) {
@@ -361,6 +408,10 @@ void plat_present(void)
 
 void plat_vsync(int n)
 {
+    if (headless) {
+        virt_advance(n / 70.0);
+        return;
+    }
     static uint64_t last;
     uint64_t period = perf_freq / 70;
     while (n-- > 0) {
@@ -450,6 +501,8 @@ void snd_load(const uint8_t *data, long len)
 
 void snd_play(int num)
 {
+    if (headless)
+        return;
     if (!snd_data || num * 16 + 3 >= snd_len)
         return;
     const uint8_t *e = snd_data + num * 16;
@@ -494,6 +547,15 @@ void snd_wait(void)
 
 int plat_init(int scale, int fullscreen)
 {
+    if (headless) {
+        if (SDL_Init(SDL_INIT_TIMER) != 0) {
+            fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+            return -1;
+        }
+        perf_freq = SDL_GetPerformanceFrequency();
+        perf_base = SDL_GetPerformanceCounter();
+        return 0;
+    }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return -1;
@@ -540,6 +602,10 @@ int plat_init(int scale, int fullscreen)
 
 void plat_shutdown(void)
 {
+    if (headless) {
+        SDL_Quit();
+        return;
+    }
     if (audio_dev)
         SDL_CloseAudioDevice(audio_dev);
     audio_dev = 0;

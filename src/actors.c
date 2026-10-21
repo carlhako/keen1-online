@@ -8,11 +8,13 @@
 
 extern void think_shot(void);
 
-static uint32_t tick(void) { return plat_ticks(); }
+/* Animation frames pick sprites (and so hitboxes): they run on game time. */
+static uint32_t tick(void) { return gtick; }
 
-/* Facing helpers: the original compares 32-bit x coordinates with Keen's. */
-static int keen_left_or_same(void) { return objs[0].x <= cur.x; }
-static int keen_left(void) { return objs[0].x < cur.x; }
+/* Facing helpers: the original compares 32-bit x coordinates with Keen's;
+ * with several Keens it is the nearest living one. */
+static int keen_left_or_same(void) { return nearest_keen()->x <= cur.x; }
+static int keen_left(void) { return nearest_keen()->x < cur.x; }
 
 static void become_corpse(obj_t *self, int sprite, int snd)
 {
@@ -33,9 +35,9 @@ static int is_shot(const obj_t *o)
 /* ------------------------------------------------------------------ */
 /* Yorp */
 
-static void yorp_walk(void);
+void yorp_walk(void);
 
-static void yorp_walk(void)
+void yorp_walk(void)
 {
     if (cur.yv == 0) {
         if (rand8() < tics) {
@@ -80,7 +82,7 @@ void yorp_stunned(void)
     move_obj();
 }
 
-static void yorp_touch(obj_t *self, obj_t *o)
+void yorp_touch(obj_t *self, obj_t *o)
 {
     if (is_shot(o))
         become_corpse(self, 0x3a, 0x22);
@@ -89,9 +91,9 @@ static void yorp_touch(obj_t *self, obj_t *o)
 /* ------------------------------------------------------------------ */
 /* Garg */
 
-static void garg_look(void);
+void garg_look(void);
 
-static void garg_walk(void)
+void garg_walk(void)
 {
     if (cur.yv == 0 && cur.xv > -0xdc && cur.xv < 0xdc && rand8() < tics) {
         cur.think = garg_look;
@@ -114,7 +116,7 @@ static void garg_walk(void)
     }
 }
 
-static void garg_look(void)
+void garg_look(void)
 {
     cur.xv = 0;
     cur.sprite = ((tick() >> 5) & 3) + 0x3c;
@@ -122,14 +124,14 @@ static void garg_look(void)
     gravity();
     move_obj();
     if (cur.timer > 0x4f) {
-        cur.xv = cur.y + 0x800 == objs[0].y ? 0xdc : 0x3c;
+        cur.xv = cur.y + 0x800 == nearest_keen()->y ? 0xdc : 0x3c;
         if (keen_left())
             cur.xv = -cur.xv;
         cur.think = garg_walk;
     }
 }
 
-static void garg_touch(obj_t *self, obj_t *o)
+void garg_touch(obj_t *self, obj_t *o)
 {
     if (is_shot(o))
         become_corpse(self, 0x44, 0x23);
@@ -138,10 +140,10 @@ static void garg_touch(obj_t *self, obj_t *o)
 /* ------------------------------------------------------------------ */
 /* Vorticon */
 
-static void vort_jump(void);
-static void vort_look(void);
+void vort_jump(void);
+void vort_look(void);
 
-static void vort_walk(void)
+void vort_walk(void)
 {
     cur.sprite = (cur.xv < 1 ? 0x46 : 0x4a) + ((tick() >> 4) & 3);
     if (rand8() < tics * 2) {
@@ -165,7 +167,7 @@ static void vort_walk(void)
         cur.xv = 0x5a;
 }
 
-static void vort_jump(void)
+void vort_jump(void)
 {
     cur.sprite = cur.xv < 1 ? 0x51 : 0x50;
     gravity();
@@ -180,7 +182,7 @@ static void vort_jump(void)
         cur.xv = 0x5a;
 }
 
-static void vort_look(void)
+void vort_look(void)
 {
     cur.xv = 0;
     cur.sprite = ((tick() >> 5) & 3) + 0x4e;
@@ -194,14 +196,14 @@ static void vort_look(void)
 }
 
 /* 0x4B0E: border flash when a Vorticon dies. */
-static void spec_flash(spec_t *s)
+void spec_flash(spec_t *s)
 {
     s->cnt += tics;
     if (s->cnt > 0x12c) {
         plat_set_border(3);
         s->active = 0;
     } else {
-        plat_set_border(((plat_ticks() >> 6) & 1) ? 0xe : 3);
+        plat_set_border(((gtick >> 6) & 1) ? 0xe : 3);
     }
 }
 
@@ -215,7 +217,7 @@ static void vort_die(obj_t *v)
     v->think = think_dying;
 }
 
-static void vort_touch(obj_t *self, obj_t *o)
+void vort_touch(obj_t *self, obj_t *o)
 {
     if (is_shot(o) && self->w24-- == 0) {
         vort_die(self);
@@ -229,9 +231,9 @@ static void vort_touch(obj_t *self, obj_t *o)
 /* ------------------------------------------------------------------ */
 /* Butler robot */
 
-static void butler_turn(void);
+void butler_turn(void);
 
-static void butler_walk(void)
+void butler_walk(void)
 {
     cur.sprite = (cur.xv < 1 ? 0x5c : 0x58) + ((tick() >> 5) & 3);
     gravity();
@@ -258,7 +260,7 @@ static void butler_walk(void)
     }
 }
 
-static void butler_turn(void)
+void butler_turn(void)
 {
     cur.timer += tics;
     if (cur.timer > 0x32) {
@@ -270,7 +272,7 @@ static void butler_turn(void)
     move_obj();
 }
 
-static void butler_touch(obj_t *self, obj_t *o)
+void butler_touch(obj_t *self, obj_t *o)
 {
     if (o->type == OT_KEENSHOT)
         self->timer = 0;
@@ -279,18 +281,18 @@ static void butler_touch(obj_t *self, obj_t *o)
 /* ------------------------------------------------------------------ */
 /* Tank robot */
 
-static void tank_walk(void);
-static void tank_turn(void);
-static void tank_fire(void);
+void tank_walk(void);
+void tank_turn(void);
+void tank_fire(void);
 
-static void tank_fall(void)
+void tank_fall(void)
 {
     gravity();
     if (move_obj() & 2)
         cur.think = tank_walk;
 }
 
-static void tank_walk(void)
+void tank_walk(void)
 {
     cur.sprite = (cur.xv < 1 ? 0x66 : 0x62) + ((tick() >> 3) & 3);
     if (rand8() < tics) {
@@ -335,7 +337,7 @@ static void tank_walk(void)
     cur.xv = 0;
 }
 
-static void tank_turn(void)
+void tank_turn(void)
 {
     cur.timer += tics;
     cur.sprite = ((tick() >> 4) & 1) + 0x6a;
@@ -345,7 +347,7 @@ static void tank_turn(void)
     }
 }
 
-static void tank_fire(void)
+void tank_fire(void)
 {
     cur.timer += tics;
     if (cur.w2c == 0 && cur.timer > 0x50) {
@@ -360,7 +362,7 @@ static void tank_fire(void)
     }
 }
 
-static void tankshot_touch(obj_t *self, obj_t *o)
+void tankshot_touch(obj_t *self, obj_t *o)
 {
     if (o->type != OT_TANK && o->type != OT_DEAD) {
         snd_play(0x25);
@@ -396,9 +398,9 @@ void spawn_tankshot(int32_t x, int32_t y, int xv)
 /* ------------------------------------------------------------------ */
 /* Ice cannons, ice blocks and chunks */
 
-static void remove_self(void) { cur.type = 0; }
+void remove_self(void) { cur.type = 0; }
 
-static void icechunk_think(void)
+void icechunk_think(void)
 {
     cur.timer += tics;
     if (cur.timer > 0x3c) {
@@ -410,7 +412,7 @@ static void icechunk_think(void)
     cur.dy += cur.yv * tics;
 }
 
-static void iceblock_think(void)
+void iceblock_think(void)
 {
     if (!move_obj())
         return;
@@ -430,7 +432,7 @@ static void iceblock_think(void)
     snd_play(0x13);
 }
 
-static void iceblock_touch(obj_t *self, obj_t *o)
+void iceblock_touch(obj_t *self, obj_t *o)
 {
     if (o->type == OT_KEEN)
         self->think = remove_self;
@@ -453,14 +455,14 @@ static void spawn_iceblock(int32_t x, int32_t y, int dir)
     o->sprite = 0x70;
 }
 
-static void spec_cannon(spec_t *s)
+void spec_cannon(spec_t *s)
 {
-    int t = (int)(plat_ticks() >> 7);
+    int t = (int)(gtick >> 7);
     if (t == s->w6)
         return;
     s->w6 = (int16_t)t;
     int tx = (int16_t)s->x, ty = (int16_t)s->y;
-    if (scroll_tx - 4 < tx && scroll_ty - 4 < ty && tx < scroll_tx + 0x18 && ty < scroll_ty + 0xe) {
+    if (cam_sees(tx, ty, 4, 4, 0x18, 0xe)) {
         snd_play(0x17);
         spawn_iceblock((int32_t)tx << 12, (int32_t)ty << 12, s->cnt);
     }
@@ -469,9 +471,9 @@ static void spec_cannon(spec_t *s)
 /* ------------------------------------------------------------------ */
 /* The chain over the Vorticon Commander (level 16) */
 
-static void spec_dropblock(spec_t *s)
+void spec_dropblock(spec_t *s)
 {
-    int t = (int)(plat_ticks() >> 5);
+    int t = (int)(gtick >> 5);
     if (t == s->w6)
         return;
     s->w6 = (int16_t)t;
@@ -493,7 +495,7 @@ static void spec_dropblock(spec_t *s)
         s->active = 0;
 }
 
-static void chain_touch(obj_t *self, obj_t *o)
+void chain_touch(obj_t *self, obj_t *o)
 {
     if (o->type != OT_KEENSHOT)
         return;
@@ -563,6 +565,19 @@ void spec_bridge_retract(spec_t *s)
 /* ------------------------------------------------------------------ */
 /* 0x1656: create objects from the level's info plane. */
 
+/* Actors spawned before the start marker face the Keens' old positions. */
+static obj_t *nearest_keen_to(int32_t x)
+{
+    obj_t *best = &objs[0];
+    for (int i = 1; i < nplayers; i++) {
+        int32_t d = objs[i].x > x ? objs[i].x - x : x - objs[i].x;
+        int32_t bd = best->x > x ? best->x - x : x - best->x;
+        if (d < bd)
+            best = &objs[i];
+    }
+    return best;
+}
+
 static obj_t *spawn(int type, int tx, int ty, int yoff, int sprite)
 {
     obj_t *o = new_obj();
@@ -583,7 +598,7 @@ void spawn_actors(void)
             case 1:
                 o = spawn(OT_YORP, tx, ty, 0x800, 0x30);
                 o->think = yorp_walk;
-                o->xv = objs[0].x <= o->x ? -0x3c : 0x3c;
+                o->xv = nearest_keen_to(o->x)->x <= o->x ? -0x3c : 0x3c;
                 o->touch = yorp_touch;
                 break;
             case 2:
@@ -596,17 +611,17 @@ void spawn_actors(void)
                 o->think = vort_walk;
                 o->touch = vort_touch;
                 o->w24 = cur_level == 16 ? 0x68 : 3;
-                o->xv = o->x <= objs[0].x ? 0x5a : -0x5a;
+                o->xv = o->x <= nearest_keen_to(o->x)->x ? 0x5a : -0x5a;
                 break;
             case 4:
                 o = spawn(OT_BUTLER, tx, ty, 0, 0x60);
-                o->xv = o->x < objs[0].x ? -0x5a : 0x5a;
+                o->xv = o->x < nearest_keen_to(o->x)->x ? -0x5a : 0x5a;
                 o->think = butler_walk;
                 o->touch = butler_touch;
                 break;
             case 5:
                 o = spawn(OT_TANK, tx, ty, 0x800, 0x6a);
-                o->xv = o->x < objs[0].x ? -0x5a : 0x5a;
+                o->xv = o->x < nearest_keen_to(o->x)->x ? -0x5a : 0x5a;
                 o->think = tank_fall;
                 o->touch = touch_none;
                 break;
@@ -625,8 +640,10 @@ void spawn_actors(void)
                 o->touch = chain_touch;
                 break;
             case 0xff:
-                objs[0].x = (int32_t)tx << 12;
-                objs[0].y = ((int32_t)ty << 12) + 0x800;
+                for (int i = 0; i < nplayers; i++) {
+                    objs[i].x = (int32_t)tx << 12;
+                    objs[i].y = ((int32_t)ty << 12) + 0x800;
+                }
                 break;
             }
         }
