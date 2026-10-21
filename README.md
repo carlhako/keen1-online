@@ -263,7 +263,7 @@ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy KEEN_SCRIPT=tests/scripts/two-player
 
 | Key | Action |
 |-----|--------|
-| Arrows | move / select |
+| Arrows (or W A S D in a one-player game) | move / select |
 | Ctrl | jump |
 | Alt | pogo stick (once found) |
 | Ctrl + Alt | fire the raygun |

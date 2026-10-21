@@ -142,6 +142,12 @@ void reset_frame_time(void)
     lasttick = plat_ticks();    /* pacing only */
 }
 
+/* Player 1's keys: W A S D also move, unless a second player needs them. */
+static int wasd_alias(void)
+{
+    return nplayers < 2;
+}
+
 static void read_keys(ctrl_t *c, const uint8_t *dir, int b1, int b2)
 {
     plat_pump();
@@ -154,6 +160,12 @@ static void read_keys(ctrl_t *c, const uint8_t *dir, int b1, int b2)
     if (keydown[dir[7]]) { y = -1; x = -1; }
     if (keydown[dir[3]]) { y = 1; x = 1; }
     if (keydown[dir[5]]) { y = 1; x = -1; }
+    if (dir == key_dir && wasd_alias()) {
+        if (keydown[0x11]) y = -1;      /* W */
+        if (keydown[0x20]) x = 1;       /* D */
+        if (keydown[0x1f]) y = 1;       /* S */
+        if (keydown[0x1e]) x = -1;      /* A */
+    }
     static const int dirs[9] = {7, 0, 1, 6, 8, 2, 5, 4, 3};
     c->dir = dirs[y * 3 + x + 4];
     c->b1 = keydown[b1] != 0;
