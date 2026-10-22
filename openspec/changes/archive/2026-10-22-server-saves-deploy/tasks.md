@@ -33,7 +33,7 @@ run with `npm test` in `server/`.
 
 ## 5. Integration check
 
-- [ ] 5.1 Install a release on the Proxmox LXC behind the reverse proxy, then from two browsers over `https`: play co-op, save on the map, load the save in a new game, and finish a game into the high score table; verify every step works through `wss://`
+- [x] 5.1 Install a release on the Proxmox LXC behind the reverse proxy, then from two browsers over `https`: play co-op, save on the map, load the save in a new game, and finish a game into the high score table; verify every step works through `wss://`
 
 ## Workflow follow-up
 
