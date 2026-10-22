@@ -11,6 +11,13 @@
 # The config, the saves and the high score table are left alone. Nothing is restarted when
 # nothing changed.
 #
+# The release carries no game data. The installer puts the Keen 1 v1.31 shareware files in
+# /var/lib/keen1-online/game (kept across upgrades, skipped when already there and correct). Each
+# file is checked against the md5 list below, so the zip may be packaged in any way. It takes the
+# zip from KEEN_DATA_ZIP, else a 1keen.zip / keen1.zip / Commander_Keen_1_-_Marooned_on_Mars_1990.zip
+# in the current directory or /root, else KEEN_DATA_URL, else the Internet Archive, else
+# commander-keen.com (Apogee's installer, unpacked with tools/unshr.py).
+#
 # Usage (as root; a fresh Debian LXC lacks curl, so `apt-get install -y curl` first):
 #   curl -fsSL https://raw.githubusercontent.com/carlhako/keen1-online/main/deploy/install.sh | bash
 #
@@ -19,6 +26,9 @@
 #   KO_TARBALL=/path/to/keen1-online-X.Y.Z.tar.gz   install a local release package
 #   KO_FORCE=1                          reinstall and restart even when already up to date
 #   KO_REPO=owner/name                  take releases from another GitHub repository
+#   KEEN_DATA_ZIP=/path/to/1keen.zip    take the game files from this zip (an error if it is wrong)
+#   KEEN_DATA_URL=https://.../1keen.zip download the zip from here instead (an error if it fails)
+#   KO_IA_URL, KO_APOGEE_URL            replace the two built-in download addresses (for testing)
 #
 # Layout:
 #   /opt/keen1-online/current -> releases/<version>     the game (root-owned, read-only to it)
@@ -26,6 +36,7 @@
 #   /etc/keen1-online/config.json                       config (see the README for the keys)
 #   /etc/keen1-online/env                               optional environment, e.g. PORT=8080
 #   /var/lib/keen1-online/saves, highscores.json        the saved games and the high score table
+#   /var/lib/keen1-online/game                          the Keen 1 shareware files (root-owned)
 
 set -euo pipefail
 
@@ -37,6 +48,9 @@ PREFIX=/opt/keen1-online
 CONF_DIR=/etc/keen1-online
 CONFIG="$CONF_DIR/config.json"
 STATE_DIR=/var/lib/keen1-online
+GAME_DIR="$STATE_DIR/game"
+IA_URL="${KO_IA_URL:-https://archive.org/download/msdos_Commander_Keen_1_-_Marooned_on_Mars_1990/Commander_Keen_1_-_Marooned_on_Mars_1990.zip}"
+APOGEE_URL="${KO_APOGEE_URL:-https://www.commander-keen.com/downloads/keen1.zip}"
 UNIT="/etc/systemd/system/$SERVICE.service"
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -152,6 +166,148 @@ fi
 node_bin="$PREFIX/node/$node_dir/bin"
 node_changed=0
 [ "$node_dir" != "$old_node" ] && node_changed=1
+
+# --- the game data ---------------------------------------------------------------
+# md5 of each Keen 1 v1.31 shareware file the page needs (server/src/gamefiles.ts names the same
+# files; a test keeps the two lists equal). CTLPANEL.CK1 and SCORES.CK1 are written by the game.
+game_md5s() {
+  cat <<'LIST'
+b1e632ee0483b66c2f1dff487547753b  EGAHEAD.CK1
+80a5870d9b48970333837fa0293561ed  EGALATCH.CK1
+ed9a0d1736034c155555543263939fe7  EGASPRIT.CK1
+3d9b5805e21a7cc7b248664b0b8f6494  ENDTEXT.CK1
+a44bcb798f931dc392903dcc5446c068  FINALE.CK1
+476301a5a6ac41e39ea18d900e1c8e02  HELPTEXT.CK1
+8b2b1f335bb49e0b81ad66af582de2ef  KEEN1.EXE
+075a98e05b6d5bbed80ec21420577582  LEVEL01.CK1
+2d6b634fbce4aa357375d62300fb3e07  LEVEL02.CK1
+956f2bbf2ad4fe7c52ad90962bd92166  LEVEL03.CK1
+57b24d48be8748362a0c5e2277d2d859  LEVEL04.CK1
+1b6cd04bffb03fe26b722260da3316f9  LEVEL05.CK1
+7859497ced955aa87b4a935b43ae15b8  LEVEL06.CK1
+337259268ca2338ee4d16818cbcd59d4  LEVEL07.CK1
+51b099927527e88f8450163d05c2ca39  LEVEL08.CK1
+de0e0de6b46474e2f4f06fc9abfd3e61  LEVEL09.CK1
+0bb9ac865cdcbd46bdcacd493669d499  LEVEL10.CK1
+b341dd49e84d7580a9eb4280827a7251  LEVEL11.CK1
+edf1eb3db5a424360996e82ecf1dba93  LEVEL12.CK1
+0cb4b321cdbb2d69682c258788ce8e4b  LEVEL13.CK1
+5d6d6814d7e7bf91dde2ec1792d45976  LEVEL14.CK1
+09b0dc88bdb234d6b2efd5b8ac973dc0  LEVEL15.CK1
+6ee167a36e7517320ff7ae6138f22e9d  LEVEL16.CK1
+bfe6781e44056cbc248701ae192122ac  LEVEL80.CK1
+b86086e33b4fb169f96abdf002fd64e3  LEVEL81.CK1
+dd1a09d6e332e0ae13c78670763ed891  LEVEL90.CK1
+c8c4b2ce09a1d19d2763493c7e7ad44a  PREVIEW2.CK1
+eaff03166eba1d1d5da749b0d687b3a6  PREVIEW3.CK1
+c480310fb66b36854b293264dbf6d8ff  PREVIEWS.CK1
+c726f4948d49c5b212cc6f6bc8a72247  SOUNDS.CK1
+0f6e2c7fc0ec2df428757386b072b071  STORYTXT.CK1
+LIST
+}
+
+# Whether every game file is in $1 with the right md5; the first bad one goes in $bad_file.
+game_files_ok() {
+  local dir="$1" sum name
+  bad_file=""
+  while read -r sum name; do
+    if [ ! -f "$dir/$name" ] || [ "$(md5sum < "$dir/$name" | cut -d' ' -f1)" != "$sum" ]; then
+      bad_file="$name"; return 1
+    fi
+  done < <(game_md5s)
+}
+
+apt_install() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq && apt-get install -y -qq "$@" >/dev/null
+}
+
+# Takes the game files out of the zip $1 into $work/new, checking each one. Works for a zip of
+# plain files in any folder, and for Apogee's installer (CK1SW131.SHR inside). Returns 1 with a
+# message when the zip is not usable; nothing outside $work is touched.
+extract_game_data() {
+  local zip="$1" tree="$work/zip" shr sum name hit
+  rm -rf "$tree" "$work/new"; mkdir -p "$tree" "$work/new"
+  command -v unzip >/dev/null || apt_install unzip || { warn "could not install unzip"; return 1; }
+  unzip -q -o "$zip" -d "$tree" 2>/dev/null || { warn "$zip is not a usable zip file"; return 1; }
+  shr="$(find "$tree" -type f -iname 'CK1SW131.SHR' | head -n1)"
+  if [ -n "$shr" ]; then
+    local unshr="${tools_src:+$tools_src/tools/unshr.py}"
+    [ -f "${unshr:-}" ] || { warn "this release has no tools/unshr.py to unpack $zip"; return 1; }
+    command -v python3 >/dev/null || apt_install python3 || { warn "could not install python3"; return 1; }
+    mkdir -p "$tree/_shr"
+    python3 "$unshr" "$shr" "$tree/_shr" >/dev/null 2>&1 || { warn "could not unpack CK1SW131.SHR from $zip"; return 1; }
+  fi
+  while read -r sum name; do
+    hit=""
+    while IFS= read -r f; do
+      if [ "$(md5sum < "$f" | cut -d' ' -f1)" = "$sum" ]; then hit="$f"; break; fi
+    done < <(find "$tree" -type f -iname "$name")
+    if [ -z "$hit" ]; then
+      if [ -n "$(find "$tree" -type f -iname "$name" | head -n1)" ]; then
+        warn "$name in $zip is not the Keen 1 v1.31 file (its md5 differs)"
+      else
+        warn "$name is not in $zip"
+      fi
+      return 1
+    fi
+    cp "$hit" "$work/new/$name"
+  done < <(game_md5s)
+}
+
+# Looks for the game files as described at the top. A source the operator named (KEEN_DATA_ZIP,
+# KEEN_DATA_URL) must work; the others are tried in turn.
+get_game_data() {
+  local zip name dir url
+  if [ -n "${KEEN_DATA_ZIP:-}" ]; then
+    [ -f "$KEEN_DATA_ZIP" ] || die "KEEN_DATA_ZIP: no such file $KEEN_DATA_ZIP"
+    log "reading the game data from $KEEN_DATA_ZIP"
+    extract_game_data "$KEEN_DATA_ZIP" || die "the game data in $KEEN_DATA_ZIP was rejected (nothing was installed)"
+    return 0
+  fi
+  for dir in "$PWD" /root; do
+    for name in 1keen.zip keen1.zip Commander_Keen_1_-_Marooned_on_Mars_1990.zip; do
+      zip="$dir/$name"
+      [ -f "$zip" ] || continue
+      log "trying the game data in $zip"
+      extract_game_data "$zip" && return 0
+    done
+  done
+  if [ -n "${KEEN_DATA_URL:-}" ]; then
+    log "downloading the game data from $KEEN_DATA_URL"
+    curl -fsSL --retry 3 --retry-all-errors "$KEEN_DATA_URL" -o "$work/data.zip" \
+      || die "could not download $KEEN_DATA_URL"
+    extract_game_data "$work/data.zip" || die "the game data from $KEEN_DATA_URL was rejected (nothing was installed)"
+    return 0
+  fi
+  for url in "$IA_URL" "$APOGEE_URL"; do
+    log "downloading the game data from $url"
+    if curl -fsSL --retry 3 --retry-all-errors "$url" -o "$work/data.zip"; then
+      extract_game_data "$work/data.zip" && return 0
+    else
+      warn "could not download $url"
+    fi
+  done
+  return 1
+}
+
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
+if game_files_ok "$GAME_DIR"; then
+  log "the Keen 1 game data is already installed"
+else
+  tools_src="${src:-$PREFIX/current}"
+  get_game_data || die "could not get the Keen 1 shareware files. Download 1keen.zip (from archive.org or
+   commander-keen.com), copy it to /root on this machine and run the installer again; or set
+   KEEN_DATA_ZIP=/path/to/zip, or KEEN_DATA_URL=https://... (see the README)"
+  log "installing the game data to $GAME_DIR"
+  rm -rf "$GAME_DIR.new" "$GAME_DIR.old"
+  mv "$work/new" "$GAME_DIR.new"
+  chown -R root:root "$GAME_DIR.new"
+  chmod 0755 "$GAME_DIR.new"; chmod 0644 "$GAME_DIR.new"/*
+  [ -d "$GAME_DIR" ] && mv "$GAME_DIR" "$GAME_DIR.old"
+  mv "$GAME_DIR.new" "$GAME_DIR"
+  rm -rf "$GAME_DIR.old"
+fi
 
 # --- the game ------------------------------------------------------------------
 old_app="$(readlink "$PREFIX/current" 2>/dev/null || true)"

@@ -16,7 +16,7 @@ const url = new URL(serverUrl);
 
 // What net.js expects from a page.
 globalThis.window = globalThis;
-globalThis.location = { protocol: url.protocol, host: url.host };
+globalThis.location = { protocol: url.protocol, host: url.host, href: url.href };
 const store = new Map();
 globalThis.localStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),

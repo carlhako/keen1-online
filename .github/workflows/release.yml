@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # A dry run: builds and assembles everything and uploads the assets as workflow
+  # artifacts, but publishes no release (the publish step only runs for a tag).
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The release is v<version in server/package.json>. A tag must say the same, and must have
+      # a CHANGELOG.md section, or this fails before anything is built or published. A manual dry
+      # run uses the version in package.json, so a missing entry is caught before anyone tags.
+      # The notes are written outside the checkout: `make release` wants a clean tree.
+      - name: Check the version and take the release notes from the changelog
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' server/package.json | head -n1)"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match server/package.json version ${version}" >&2
+            exit 1
+          fi
+          echo "release notes for v${version}"
+          .github/scripts/release-notes.sh "v${version}" | tee "${RUNNER_TEMP}/release-notes.md"
+          echo "VERSION=${version}" >> "${GITHUB_ENV}"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # The same Emscripten as the local builds; the build id is a hash of the wasm file, so a
+      # different compiler would still give a consistent release.
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.13
+          actions-cache-folder: emsdk-cache
+
+      # The package holds no game data: `make release` fails if any file of it got in.
+      - name: Build the release package
+        run: |
+          make release
+          mkdir release
+          mv "keen1-online-${VERSION}.tar.gz" release/
+          cp deploy/install.sh release/install.sh
+          tar -tzf "release/keen1-online-${VERSION}.tar.gz"
+
+      - name: Upload assets as workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: |
+            release/*.tar.gz
+            release/install.sh
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: |
+            release/*.tar.gz
+            release/install.sh
+          fail_on_unmatched_files: true

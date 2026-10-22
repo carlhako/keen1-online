@@ -52,10 +52,9 @@ dist: keen1
 	tar czf $(DIST).tar.gz $(DIST)
 
 # Browser build. The blocking DOS-style loops stay as they are: ASYNCIFY
-# lets plat_vsync() yield to the browser. Only the shareware episode is
-# bundled (WEB_DATA, preloaded read-only as /data).
+# lets plat_vsync() yield to the browser. No game data is bundled: web/pre.js
+# fetches the shareware files from the server into /data when the page loads.
 EMCC     ?= emcc
-WEB_DATA ?= shareware/data
 WEB_OUT  := build/web
 WEB_FLAGS := -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -sUSE_SDL=2 \
 	-sASYNCIFY -sASYNCIFY_STACK_SIZE=65536 -sSTACK_SIZE=1MB -sALLOW_MEMORY_GROWTH \
@@ -67,11 +66,9 @@ WEB_FLAGS := -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -sUSE_SDL=2 \
 # told to reload.
 web: $(WEB_OUT)/index.html
 
-$(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/net.js web/shell.html $(wildcard $(WEB_DATA)/*)
-	@test -f $(WEB_DATA)/EGAHEAD.CK1 || { echo "No Keen 1 shareware data in $(WEB_DATA)" \
-		"(extract 1keen.zip with tools/unshr.py or set WEB_DATA=dir)"; exit 1; }
+$(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/net.js web/shell.html
 	mkdir -p $(WEB_OUT)
-	$(EMCC) $(WEB_FLAGS) -o $@ $(SRC) --preload-file $(WEB_DATA)@/data
+	$(EMCC) $(WEB_FLAGS) -o $@ $(SRC)
 	@id=$$(sha256sum $(WEB_OUT)/index.wasm | cut -c1-16); \
 	echo $$id > $(WEB_OUT)/build-id.txt; \
 	sed -i "s/@BUILD_ID@/$$id/" $(WEB_OUT)/index.html
@@ -111,11 +108,12 @@ test: keen1
 test-online: nodenet
 	node --test tests/online/e2e.test.mjs
 
-# Release package of the online game: the built server, the web build (with the shareware episode
-# data inside its index.data), the example config, the installer and the README. It runs with
+# Release package of the online game: the built server, the web build, the example config, the
+# installer, the data unpacker (tools/unshr.py) and the README. It holds no game data: the installer
+# fetches the shareware files, and the check below fails the build if any got in. It runs with
 # Node 22 and `npm ci --omit=dev` in server/, no build step. The version is the one in
 # server/package.json. The tree must be clean, so a release always matches a commit. Needs emcc
-# on PATH (see `make web`). Publish it with `gh release create v<version> keen1-online-<version>.tar.gz`.
+# on PATH (see `make web`). Releases are published by .github/workflows/release.yml from a tag.
 VERSION := $(shell sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' server/package.json | head -n1)
 RELEASE := keen1-online-$(VERSION)
 RELEASE_DIR := build/release
@@ -130,9 +128,13 @@ release:
 	cp -r server/dist server/package.json server/package-lock.json $(RELEASE_DIR)/$(RELEASE)/server/
 	cp -r $(WEB_OUT) $(RELEASE_DIR)/$(RELEASE)/web
 	cp -r deploy $(RELEASE_DIR)/$(RELEASE)/deploy
+	mkdir -p $(RELEASE_DIR)/$(RELEASE)/tools
+	cp tools/unshr.py $(RELEASE_DIR)/$(RELEASE)/tools/
 	cp server/config.example.json .nvmrc README.md $(RELEASE_DIR)/$(RELEASE)/
 	git rev-parse HEAD > $(RELEASE_DIR)/$(RELEASE)/COMMIT
 	tar czf $(RELEASE).tar.gz -C $(RELEASE_DIR) $(RELEASE)
+	@if tar -tzf $(RELEASE).tar.gz | grep -iE '\.(ck1|shr)$$|keen1\.exe$$|index\.data$$'; then \
+		echo "make release: the package contains game data (listed above)"; rm -f $(RELEASE).tar.gz; exit 1; fi
 	@echo "built $(RELEASE).tar.gz from $$(git rev-parse --short HEAD)"
 
 clean:

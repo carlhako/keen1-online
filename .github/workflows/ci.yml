@@ -29,9 +29,9 @@ jobs:
 
   # The native build, and the determinism tests that replay recorded games through it. The tests
   # need the shareware episode, which is not in the repository: set the repository variable
-  # KEEN_SHAREWARE_URL to where `1keen.zip` (with CK1SW131.SHR) can be downloaded and they run;
-  # without it only the build is checked. The WebAssembly build is not made here (no emsdk), so
-  # releases are built locally with `make release`.
+  # KEEN_SHAREWARE_URL to a zip that holds it and they run; without it only the build is checked.
+  # Either the Internet Archive zip (plain files in a CKeen1/ folder) or Apogee's `1keen.zip`
+  # (with CK1SW131.SHR) will do. The WebAssembly build is not made here; release.yml does that.
   game:
     name: Game
     runs-on: ubuntu-latest
@@ -47,7 +47,18 @@ jobs:
         run: |
           curl -fsSL "$KEEN_SHAREWARE_URL" -o /tmp/1keen.zip
           unzip -q /tmp/1keen.zip -d /tmp/1keen
-          python3 tools/unshr.py "$(find /tmp/1keen -iname 'CK1SW131.SHR' | head -n1)" shareware/data
+          mkdir -p shareware/data
+          shr="$(find /tmp/1keen -iname 'CK1SW131.SHR' | head -n1)"
+          if [ -n "$shr" ]; then
+            python3 tools/unshr.py "$shr" shareware/data
+          else
+            # Plain files in any folder. The saved games and the settings of whoever packed
+            # the zip are left out, as the game makes its own.
+            find /tmp/1keen -type f \( -iname '*.CK1' -o -iname 'KEEN1.EXE' \) \
+              ! -iname 'SAVED*' ! -iname 'CTLPANEL.CK1' ! -iname 'SCORES.CK1' \
+              -exec cp {} shareware/data/ \;
+          fi
+          test -f shareware/data/EGAHEAD.CK1 && test -f shareware/data/KEEN1.EXE
       - name: Replay determinism tests
         if: env.KEEN_SHAREWARE_URL != ''
         run: SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy sh tests/run.sh

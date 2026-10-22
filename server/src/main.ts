@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfigOrExit } from './config.ts';
+import { gameDataComplete } from './http.ts';
 import { GameServer } from './server.ts';
 
 const config = loadConfigOrExit();
@@ -25,6 +26,12 @@ const frameLogDir = process.env.KEEN_FRAMELOG ? resolve(process.env.KEEN_FRAMELO
 if (frameLogDir) console.log(`writing frame logs to ${frameLogDir}`);
 const dataDir = resolve(config.dataDir);
 console.log(`keeping saves and high scores in ${dataDir}`);
+const gameDir = join(dataDir, 'game');
+console.log(
+  gameDataComplete(gameDir)
+    ? `serving the game files from ${gameDir}`
+    : `NO GAME DATA in ${gameDir}: the page cannot start a game (see the README, "Game data")`,
+);
 function readVersion(): string | undefined {
   try {
     const pkg = JSON.parse(
@@ -42,6 +49,7 @@ const server = new GameServer({
   webDir,
   frameLogDir,
   dataDir,
+  gameDir,
   log: (message) => console.log(`${new Date().toISOString()} ${message}`),
 });
 const port = await server.listen();

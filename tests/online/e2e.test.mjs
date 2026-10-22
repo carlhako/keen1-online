@@ -35,6 +35,7 @@ async function startServer(config = {}) {
   server = new GameServer({
     config: { ...defaultConfig(), port: 0, ...config },
     webDir: join(tmp.dir, 'web'),
+    gameDir: dataDir,
     frameLogDir: join(tmp.dir, 'logs'),
     log: (m) => logs.push(m),
   });

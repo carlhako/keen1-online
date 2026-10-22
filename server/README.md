@@ -23,8 +23,20 @@ in `../web` (a release) or `../build/web` (a checkout); `KEEN_WEB_DIR` overrides
 
 Saves and the high score table are files under `dataDir` (see [Saves and the high score table](#saves-and-the-high-score-table)).
 
-`/healthz` answers `{"status":"ok","games":N,"players":N,"buildId":"...","version":"..."}`; `version` is the
-release's `package.json` version, which the installer checks after an upgrade.
+The 31 Keen 1 shareware files the page needs live in `dataDir/game/` (the installer puts them there;
+the server logs `NO GAME DATA` at start when they are missing). The server lists them at `data/index.json`
+and serves each at `data/<NAME>` (only names from its fixed list, `src/gamefiles.ts`); the page fetches
+them before the game starts.
+
+`/healthz` answers `{"status":"ok","games":N,"players":N,"buildId":"...","gameData":"ok","version":"..."}`;
+`gameData` is `missing` until all the game files are in place, and `version` is the release's
+`package.json` version, which the installer checks after an upgrade.
+
+The server works under any URL path prefix: `/keen/`, `/keen/index.js`, `/keen/healthz`, `/keen/data/...`
+and the WebSocket at `/keen/ws` are answered like their unprefixed forms, and `/keen` redirects to
+`/keen/`. A path is matched by its shortest tail that names something the server serves; a path without
+an extension that names nothing is taken for the prefix and redirected to its slash form, and everything
+else is a 404.
 
 ### Configuration
 

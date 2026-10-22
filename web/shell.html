@@ -180,17 +180,21 @@
   window.KEEN_BUILD_ID = '@BUILD_ID@';
   (function () {
     var $ = function (id) { return document.getElementById(id); };
-    var ready = false, running = false;
+    var ready = false, running = false, noData = false;
 
     window.Module = {
       canvas: $('canvas'),
       setStatus: function (text) {
-        if (!ready && text) $('loading').textContent = text.replace(/\(\d+\/\d+\)/, '').trim() || 'Loading game data\u2026';
+        if (!ready && !noData && text) $('loading').textContent = text.replace(/\(\d+\/\d+\)/, '').trim() || 'Loading game data\u2026';
       },
       onRuntimeInitialized: function () {
         ready = true;
         $('loading').hidden = true;
         maybeStart();
+      },
+      onDataError: function () {
+        noData = true;
+        $('loading').textContent = 'This server has no game data installed. Ask whoever runs it to add the Keen 1 shareware files.';
       },
       onExit: function (code) { finish(code ? 'The game stopped with an error (' + code + ').' : null); },
       onAbort: function (what) { finish('The game crashed: ' + what); }

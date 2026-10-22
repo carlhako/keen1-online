@@ -111,6 +111,17 @@ describe('/ws', () => {
   it('does not upgrade other paths', async () => {
     const { closed } = connect(url.replace('/ws', '/other'));
     await closed;
+    const { closed: prefixed } = connect(url.replace('/ws', '/keen/other'));
+    await prefixed;
+  });
+
+  it('upgrades under a path prefix', async () => {
+    const { ws, messages } = connect(url.replace('/ws', '/keen/ws'));
+    await new Promise((r) => ws.on('open', r));
+    ws.send(JSON.stringify({ t: 'hello', v: PROTOCOL_VERSION, build: 'build42' }));
+    await until(() => messages.length >= 2);
+    expect(messages[0]?.t).toBe('welcome');
+    expect(messages[1]?.t).toBe('lobby');
   });
 
   it('frees the seat when the socket closes', async () => {

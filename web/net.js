@@ -67,8 +67,10 @@ Module.net = (function () {
   net.send = send;
 
   net.connect = function () {
-    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    // Relative to the page, so the game works under any path prefix a proxy keeps.
+    var url = new URL('ws', location.href);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(url.href);
     ws.binaryType = 'arraybuffer';
     ws.onopen = function () {
       send({ t: 'hello', v: PROTOCOL, build: window.KEEN_BUILD_ID });

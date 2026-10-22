@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createBuildIdReader } from './buildid.ts';
 import type { ServerConfig } from './config.ts';
@@ -15,6 +16,8 @@ export interface ServerOptions {
   frameLogDir?: string;
   /** Where saves and high scores are kept; without it they live in memory only (tests). */
   dataDir?: string;
+  /** The game files the page loads; defaults to `game/` in `dataDir`. */
+  gameDir?: string;
   /** The release version, reported by `/healthz` so an installer can tell which one answered. */
   version?: string;
 }
@@ -43,21 +46,20 @@ export class GameServer {
       frameLogDir: opts.frameLogDir,
       dataDir: opts.dataDir,
     });
-    this.http = createServer(
-      createHttpHandler({
-        webDir: opts.webDir,
-        health: () => ({
-          games: this.hub.games.size,
-          players: this.hub.playerCount,
-          buildId: this.buildId(),
-          version: opts.version,
-        }),
+    const { handler, route } = createHttpHandler({
+      webDir: opts.webDir,
+      gameDir: opts.gameDir ?? (opts.dataDir ? join(opts.dataDir, 'game') : undefined),
+      health: () => ({
+        games: this.hub.games.size,
+        players: this.hub.playerCount,
+        buildId: this.buildId(),
+        version: opts.version,
       }),
-    );
+    });
+    this.http = createServer(handler);
     this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
     this.http.on('upgrade', (req, socket, head) => {
-      const path = (req.url ?? '').split('?')[0];
-      if (path !== '/ws') {
+      if (route(req.url ?? '').kind !== 'ws') {
         socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
         return;
       }
