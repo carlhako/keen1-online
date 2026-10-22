@@ -4,7 +4,7 @@
 
 - [x] 1.1 Wrap `deploy/install.sh` per design D4: constants stay at file scope, everything from the root/apt-get/systemctl checks to the final `log` lines moves into `main() { ... }`, the work-directory `trap` is set inside `main`, and the last line is `{ main "$@"; }` (a bare `main "$@"` cut to `main` would still run). Update the header comment to say why. Verify `bash -n deploy/install.sh` passes and `git diff -w` shows the body moved, not edited.
 - [x] 1.2 Add `tests/install-truncation.sh`: for every line of `deploy/install.sh`, run bash as a non-root user on the file cut at the start and in the middle of that line, and fail if any run prints `==>`, `!!` or `XX`; then run the whole file and require exactly the `run as root` error. Verify it passes on the wrapped script and fails on the unwrapped one (`git stash` the 1.1 change to check).
-- [ ] 1.3 Add a step that runs `tests/install-truncation.sh` to CI's server job in `.github/workflows/ci.yml`. Verify the CI run on the branch shows the step passing.
+- [x] 1.3 Add a step that runs `tests/install-truncation.sh` to CI's server job in `.github/workflows/ci.yml`. Verify the CI run on the branch shows the step passing.
 - [ ] 1.4 Run the wrapped installer as root in a fresh Debian 13 LXC or container with `KO_TARBALL` set to a package built from this branch (`make release`): verify a fresh install prints the play address and `/healthz` answers, and that a second run reports "nothing to do" without restarting the service.
 
 ## 2. Remove the native player packaging
@@ -29,7 +29,7 @@
 ## 6. Release 0.2.1
 
 - [x] 6.1 Make `make release` copy `docs/` into the package beside `README.md` (design D5) and mention it in the Makefile's release comment. Verify `make release` on a clean tree lists `docs/guide.md` and `docs/development.md` in the tarball and its game-data check still passes.
-- [ ] 6.2 Bump `server/package.json` (and the lockfile's version) to `0.2.1` and add a `## 0.2.1 - <date>` section to `CHANGELOG.md`: README leads with the install, docs moved to `docs/`, installer cannot run half-downloaded, native player packaging removed. Verify `.github/scripts/release-notes.sh v0.2.1` prints the section and a release dry run (`workflow_dispatch`) succeeds.
+- [x] 6.2 Bump `server/package.json` (and the lockfile's version) to `0.2.1` and add a `## 0.2.1 - <date>` section to `CHANGELOG.md`: README leads with the install, docs moved to `docs/`, installer cannot run half-downloaded, native player packaging removed. Verify `.github/scripts/release-notes.sh v0.2.1` prints the section and a release dry run (`workflow_dispatch`) succeeds.
 
 ## Workflow follow-up
 
