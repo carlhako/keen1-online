@@ -4,7 +4,7 @@ Each released version has a section headed `## <version> - <date>`. The release 
 publishes that section as the GitHub release notes. A tag without a section here is not published,
 so add the entry with the version bump.
 
-## Unreleased
+## 0.3.1 - 2026-10-22
 
 ### What's new
 

@@ -133,7 +133,7 @@ unpacker, the README and these guides. It holds no game data (see [Game data](#g
 needs Node 22 (see [`.nvmrc`](../.nvmrc)) and no build step:
 
 ```
-tar xzf keen1-online-0.3.0.tar.gz && cd keen1-online-0.3.0/server
+tar xzf keen1-online-0.3.1.tar.gz && cd keen1-online-0.3.1/server
 npm ci --omit=dev
 mkdir -p data/game    # then copy the game files into it, see Game data
 npm start
