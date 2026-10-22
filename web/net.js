@@ -38,6 +38,7 @@ Module.net = (function () {
   var golive = -1;
   var saveResult = -1;          // the answer to our last save: -1 waiting, 0 refused, 1 stored
   var endedQueue = [];          // `ended` messages not yet taken by the game
+  var chatQueue = [];           // chat lines not yet taken by the game: {seat, text}
   var rttSamples = [];
   var waitStart = 0;
   var lastSentPing = 0;
@@ -175,6 +176,9 @@ Module.net = (function () {
       endedQueue.push(m.entry);
       net.ended = true;
       break;
+    case 'chat':
+      if (chatQueue.length < 16) chatQueue.push({ seat: m.seat, text: m.text });
+      return;
     case 'left':
       net.game = null;
       net.paused = null;
@@ -320,6 +324,11 @@ Module.net = (function () {
   net.submitScore = function (name, score, parts) {
     send({ t: 'score', name: name, score: score | 0, parts: parts | 0 });
   };
+
+  // C on the game's screen: a chat line for everybody in the game. The server sends it back to us
+  // too, and the game shows it when it arrives (takeChat).
+  net.chat = function (text) { send({ t: 'chat', text: text }); };
+  net.takeChat = function () { return chatQueue.shift() || null; };
 
   net.upload = function (kind, f, sum, data) {
     if (!ws || ws.readyState !== 1) return;

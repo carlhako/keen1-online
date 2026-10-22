@@ -28,6 +28,13 @@ export const MALFORMED_LIMIT = 5;
 /** A frame's input packs direction (0..8), the two buttons and the one-frame events. */
 export const MAX_INPUT = 1 << 11;
 
+/** The longest chat message, in characters (it must fit on one line of the game's screen). */
+export const CHAT_MAX = 32;
+
+/** Chat messages one seat may send per `CHAT_WINDOW_MS`. */
+export const CHAT_RATE = 5;
+export const CHAT_WINDOW_MS = 10_000;
+
 /** The largest score a game record or a table entry may hold. */
 export const MAX_SCORE = 99_999_999;
 
@@ -92,6 +99,8 @@ export type ClientMessage =
   /** The ending cinematic started: no inputs will come until `finished`. */
   | { t: 'ending' }
   | { t: 'finished' }
+  /** A chat line for everyone in the game (not game state: it never touches the frames). */
+  | { t: 'chat'; text: string }
   | { t: 'ping'; c: number };
 
 // ---- server to browser ----
@@ -133,6 +142,8 @@ export type ServerMessage =
   /** The high score table. */
   | { t: 'scores'; rows: ScoreRow[] }
   | { t: 'left' }
+  /** A chat line from `seat`, sent to every player in the game, the sender too. */
+  | { t: 'chat'; seat: number; text: string }
   | { t: 'pong'; c: number };
 
 /** Binary frames. Browser to server: `UP_*`. Server to browser: `DOWN_RESTORE`. */
@@ -218,6 +229,13 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
         : null;
     case 'ready':
       return isInt(m.f, 0, 2 ** 32 - 1) ? { t: 'ready', f: m.f } : null;
+    case 'chat':
+      return typeof m.text === 'string' &&
+        m.text.length >= 1 &&
+        m.text.length <= CHAT_MAX &&
+        /^[\x20-\x7e]+$/.test(m.text)
+        ? { t: 'chat', text: m.text }
+        : null;
     case 'ping':
       return isInt(m.c, 0, Number.MAX_SAFE_INTEGER) ? { t: 'ping', c: m.c } : null;
     default:

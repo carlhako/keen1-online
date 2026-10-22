@@ -45,13 +45,19 @@ void plat_clear_keys(void);
 /* bioskey(): peek=1 returns the pending key without removing it.
  * Result is (scancode << 8) | ascii, or 0 when no key is waiting. */
 int plat_bioskey(int peek);
+/* Every key typed since the last call or clear, oldest first (same encoding), 0 when none. */
+int plat_text_key(void);
+void plat_text_clear(void);
+uint32_t plat_ms(void);                 /* wall clock in milliseconds, for timed messages */
 
 /* PC speaker sounds (SOUNDS.CK1 format). */
 void snd_load(const uint8_t *data, long len);
 void snd_play(int num);
+void snd_play_always(int num);          /* plays even while snd_muted */
 void snd_stop(void);
 int snd_busy(void);
 void snd_wait(void);
 extern int snd_enabled;
+extern int snd_muted;                   /* the game's current sound source is off this player's screen */
 
 #endif

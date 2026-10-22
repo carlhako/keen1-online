@@ -139,6 +139,29 @@ static int key_ascii(const SDL_Keysym *k)
     return 0;
 }
 
+/* Text entry (chat) needs every key typed, not only the last one: a queue of its own. */
+static uint16_t textq[32];
+static unsigned textq_head, textq_tail;
+
+int plat_text_key(void)
+{
+    plat_pump();
+    if (textq_head == textq_tail)
+        return 0;
+    return textq[textq_tail++ % 32];
+}
+
+void plat_text_clear(void)
+{
+    plat_pump();
+    textq_tail = textq_head;
+}
+
+uint32_t plat_ms(void)
+{
+    return SDL_GetTicks();
+}
+
 /* The game's keyboard ISR empties the BIOS buffer before chaining to the
  * BIOS handler, so only the most recent key is ever waiting. */
 static void push_key(uint16_t k)
@@ -172,6 +195,8 @@ void plat_pump(void)
             if (ev.type == SDL_KEYDOWN) {
                 keydown[sc] = 1;
                 push_key((uint16_t)(sc << 8 | key_ascii(&ev.key.keysym)));
+                if (textq_head - textq_tail < 32)
+                    textq[textq_head++ % 32] = (uint16_t)(sc << 8 | key_ascii(&ev.key.keysym));
             } else {
                 keydown[sc] = 0;
             }
@@ -527,7 +552,15 @@ void snd_load(const uint8_t *data, long len)
     snd_len = len;
 }
 
+int snd_muted;
+
 void snd_play(int num)
+{
+    if (!snd_muted)
+        snd_play_always(num);
+}
+
+void snd_play_always(int num)
 {
     if (headless || plat_fast)
         return;

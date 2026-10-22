@@ -2,8 +2,9 @@
 
 ## Purpose
 
-Defines how a co-op level plays out for the players in it: who is alive, when the level is won or
-lost, how players agree to restart or leave, and what happens to shared items when a level is lost.
+Defines how a co-op level plays out for the players in it: who is alive, where a Keen that dies
+starts again, when the level is won, how players agree to restart or leave, what happens to shared
+items when a level is restarted or left, and which of a partner's sounds a player hears.
 
 ## Requirements
 
@@ -13,15 +14,29 @@ a level never ends the game, and score-based extra lives SHALL not be shown.
 
 #### Scenario: Many deaths
 - **WHEN** both players die in the same level ten times in a row
-- **THEN** the level restarts each time and the game continues
+- **THEN** each time both Keens start again at the level start and the game continues
 
 ### Requirement: Player status in a level
-Each player in a level SHALL be alive, dead or exited. A player becomes dead when their Keen's
-death animation finishes, and exited when their Keen walks through the exit door.
+Each player in a level SHALL be alive, dead or exited. A player becomes exited when their Keen
+walks through the exit door, and dead when their Keen's death animation finishes while another
+player has already exited.
 
 #### Scenario: Keen dies while partner plays on
-- **WHEN** player 1's Keen is killed by a Garg while player 2 is alive
-- **THEN** player 1 becomes dead and player 2 keeps playing
+- **WHEN** player 1's Keen is killed by a Garg while player 2 is alive and nobody has exited
+- **THEN** player 1 stays alive, starting again at the level start, and player 2 keeps playing
+
+### Requirement: Death respawns at the level start
+When a Keen's death animation finishes and no player has exited the level, that Keen SHALL start
+again, alive, where Keens start the level. The level SHALL go on: its enemies, opened doors and
+collected items stay as they are, and the shared record is kept.
+
+#### Scenario: Keen falls out of the level
+- **WHEN** player 1's Keen falls out of the bottom of level 1 while player 2 is elsewhere
+- **THEN** player 1's Keen and camera are back at level 1's start and player 2 is unaffected
+
+#### Scenario: Items kept after a death
+- **WHEN** player 1 collects the battery in level 3 and then dies
+- **THEN** the shared record still holds the battery and player 1's Keen is at the level start
 
 ### Requirement: Watching the partner
 A dead or exited player's screen SHALL follow a Keen that is still alive, until the level ends.
@@ -35,28 +50,42 @@ When no player is alive and at least one player has exited, the level SHALL succ
 done, items and score collected in it are kept, and every player returns to the world map at that
 level's entrance with a living Keen.
 
-#### Scenario: One exits, partner dead
-- **WHEN** player 1 is dead and player 2 walks through the exit door
+#### Scenario: Both exit
+- **WHEN** player 1 walks through the exit door and later player 2 does too
 - **THEN** the level is marked done and both players appear on the world map at its entrance
 
 #### Scenario: One exits, partner dies afterwards
 - **WHEN** player 1 has exited and player 2 then dies
 - **THEN** the level succeeds
 
-### Requirement: Level failure restarts the level
-When every player is dead, the level SHALL fail and restart at once with every player alive at
-the level start.
+### Requirement: Partner finished message
+While a player has exited a level that is still going on, every other player SHALL see a strip at
+the top of the screen saying that player has finished the level.
 
-#### Scenario: Both die
-- **WHEN** player 1 dies and later player 2 dies, with nobody exited
-- **THEN** the same level restarts with both Keens at the start
+#### Scenario: Partner walks out
+- **WHEN** player 2 walks through the exit door while player 1 is still in the level
+- **THEN** player 1 sees "PLAYER 2 HAS FINISHED THE LEVEL" until the level ends
+
+### Requirement: Partner sounds heard on screen
+A player SHALL hear the sounds of their own Keen, and the sounds of other Keens, enemies, shots
+and cannons only while their source is on that player's screen. A Keen dying, a door opening
+and a Keen walking into the exit door SHALL be heard by every player wherever they happen.
+Sound is local output, never game state.
+
+#### Scenario: Partner collects off screen
+- **WHEN** player 2 collects a candy bar far outside player 1's screen
+- **THEN** player 1 does not hear it, and player 2 does
+
+#### Scenario: Partner dies off screen
+- **WHEN** player 2's Keen dies outside player 1's screen
+- **THEN** player 1 hears the death sound
 
 ### Requirement: Shared items roll back on failure
-When a level fails, restarts by vote, or is left by vote, the shared game record (score, ammo,
-keycards, ship parts, pogo, completed levels) SHALL return to its state at the start of that level.
+When a level restarts by vote or is left by vote, the shared game record (score, ammo, keycards,
+ship parts, pogo, completed levels) SHALL return to its state at the start of that level.
 
 #### Scenario: Ship part lost on restart
-- **WHEN** a player collects the battery in level 3, earns 5000 points, and then the level fails
+- **WHEN** a player collects the battery in level 3, earns 5000 points, and then both players vote to restart
 - **THEN** after the restart the battery is back in the level and the score is what it was when the level started
 
 ### Requirement: Restart vote

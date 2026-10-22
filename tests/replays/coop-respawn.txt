@@ -1,0 +1,11 @@
+# Co-op level 1. Both players fall out of the level, one after the other. Each Keen starts
+# again where the level starts once his death has played out; the level goes on.
+players 2
+coop 1
+seed 23
+level 1
+0 1 8 0 0
+0 2 8 0 0
+warp 5 1 5 120
+warp 60 2 5 120
+end 400

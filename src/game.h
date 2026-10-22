@@ -144,6 +144,8 @@ void banner_add(int kind);
 void coop_tick(void);
 int coop_level_eval(void);              /* LR_* or -1 */
 void coop_follow_cameras(void);
+int coop_level_start(int32_t *x, int32_t *y);   /* the level's start marker: 1 found */
+int coop_anyone_exited(void);
 void coop_add_player(int seat);         /* online: a player joins; the Keen appears on top of another */
 void coop_remove_player(int seat);      /* online: a player's Keen leaves the game */
 
@@ -274,6 +276,8 @@ int net_wait_ended(void);               /* after the ending: the seat to type th
 void net_submit_score(const char *name, int32_t score, int parts);
 typedef struct { int32_t score, parts; char name[16]; } net_score_t;
 int net_scores(net_score_t *rows);      /* the server's high score table (7 rows); 0 when not known */
+void net_chat_send(const char *text);   /* a chat line to everybody in the game */
+int net_chat_take(char *text, int max); /* a chat line that arrived (the sender's too): its seat, or -1 */
 void sim_warp(int p, int tx, int ty);        /* test aid: put a Keen on a tile */
 int sim_snapshot_kind(const uint8_t *buf, size_t len, int *in_map, int *level);
 

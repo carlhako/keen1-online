@@ -217,6 +217,9 @@ export class Hub {
       case 'finished':
         if (c.game) c.game.finish(c.game.seatOf(c));
         break;
+      case 'chat':
+        if (c.game) c.game.chat(c.game.seatOf(c), m.text);
+        break;
       case 'ping':
         c.send({ t: 'pong', c: m.c });
         break;

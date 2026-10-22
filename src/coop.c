@@ -153,6 +153,28 @@ void coop_follow_cameras(void)
 
 extern void keen_walk(void), keen_touch(obj_t *, obj_t *);
 
+/* Where Keens start the level (the start marker, as spawn_actors places them): 1 found, 0 none. */
+int coop_level_start(int32_t *x, int32_t *y)
+{
+    for (int ty = 0; ty < map_h; ty++)
+        for (int tx = 0; tx < map_w; tx++)
+            if (MAPI(tx, ty) == 0xff) {
+                *x = (int32_t)tx << 12;
+                *y = ((int32_t)ty << 12) + 0x800;
+                return 1;
+            }
+    return 0;
+}
+
+/* Has any player walked through the exit door? Then a death ends the level instead of respawning. */
+int coop_anyone_exited(void)
+{
+    for (int p = 0; p < nplayers; p++)
+        if (players[p].status == PS_EXITED)
+            return 1;
+    return 0;
+}
+
 /* Where the Keen of a joining player goes: on top of the lowest-numbered Keen that is
  * alive, else any Keen in the game, else where the level starts (or the map's entrance). */
 static void join_position(int seat, int32_t *x, int32_t *y)
@@ -171,13 +193,7 @@ static void join_position(int seat, int32_t *x, int32_t *y)
     *x = gs.mapx;
     *y = gs.mapy;
     if (!in_world_map)
-        for (int ty = 0; ty < map_h; ty++)
-            for (int tx = 0; tx < map_w; tx++)
-                if (MAPI(tx, ty) == 0xff) {
-                    *x = (int32_t)tx << 12;
-                    *y = ((int32_t)ty << 12) + 0x800;
-                    return;
-                }
+        coop_level_start(x, y);
 }
 
 void coop_add_player(int seat)

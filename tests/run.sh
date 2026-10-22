@@ -44,9 +44,9 @@ check() {
 }
 check single-player-death "result 0 \(died\)" "lives 3, levels done:"
 check coop-exit-then-death "result 1 \(completed\)" "P1: exited  P2: dead"
-check coop-death-then-exit "result 1 \(completed\)" "P1: dead  P2: exited"
-check coop-both-die "result 4 \(failed\)" "P1: dead  P2: dead" "result 6 \(stopped\)"
-check coop-rollback "result 4 \(failed\)" "score 0 ammo 0 lives 4 parts 0000  P1: dead  P2: dead"
+check coop-death-then-exit "result 6 \(stopped\)" "P1: alive  P2: exited"
+check coop-respawn "result 6 \(stopped\)" "P1: alive  P2: alive"
+check coop-rollback "result 4 \(failed\)" "score 0 ammo 0 lives 4 parts 0000  P1: alive  P2: alive"
 check coop-votes "ended after 41 frames, result 4 \(failed\)" "ended after 51 frames, result 5 \(left by vote\)"
 check coop-solo-restart "ended after 11 frames, result 4 \(failed\)"
 check coop-events "result 5 \(left by vote\)" "P1 21,39  P2 21,39"
@@ -59,9 +59,13 @@ check coop-return-to-map "levels done: 1$" "P1 24,30  P2 24,30"
 check coop-ending "all four ship parts: the ending plays" "levels done: 3"
 check coop-levels-1-4 "levels done: 1 2 3 4"
 check coop-statue "result 6 \\(stopped\\)"
-./keen1 --data "$DATA" --replay tests/replays/coop-ten-deaths.txt > "$TMP/out.txt" 2>&1
-[ "$(grep -c 'result 4 (failed)' "$TMP/out.txt")" = 10 ] && ok "coop-ten-deaths: ten failures in a row, the game goes on" \
-    || bad "coop-ten-deaths: not ten failures"
+# A dead Keen starts again where the level starts (12288,63743 in level 1), and the level goes on.
+for r in coop-respawn coop-ten-deaths; do
+    ./keen1 --data "$DATA" --replay "tests/replays/$r.txt" --dump-objs > "$TMP/out.txt" 2>&1
+    ! grep -q "result 4 (failed)" "$TMP/out.txt" && grep -q "P1: alive  P2: alive" "$TMP/out.txt" \
+        && [ "$(grep -Ec '^obj  [01] type  1 x   12288 y   63743$' "$TMP/out.txt")" = 2 ] \
+        && ok "$r: both Keens back at the level start, no restart" || bad "$r: the Keens did not respawn"
+done
 ./keen1 --data "$DATA" --replay tests/replays/coop-castle-switch.txt --checksums "$TMP/jit.ck" > /dev/null
 KEEN_NOJITTER=1 ./keen1 --data "$DATA" --replay tests/replays/coop-castle-switch.txt --checksums "$TMP/nojit.ck" > /dev/null
 cmp -s "$TMP/jit.ck" "$TMP/nojit.ck" && ok "castle switch: checksums the same with and without the screen jitter" \
@@ -125,9 +129,9 @@ solo_log "$TMP/alive.netlog" 100 "warp 150 1 113 8"
     || bad "player 2 leaves, player 1 alive: the level did not go on"
 solo_log "$TMP/dead.netlog" 330 "warp 50 1 5 120"
 ./keen1 --data "$DATA" --netlog "$TMP/dead.netlog" --netsums "$TMP/dead.sums" > /dev/null
-[ -n "$(loc_at "$TMP/dead.sums" 331)" ] && [ "$(loc_at "$TMP/dead.sums" 480)" = 1 ] \
-    && ok "player 2 leaves, player 1 dead: the level fails at once and restarts for player 1" \
-    || bad "player 2 leaves, player 1 dead: no restart"
+[ -z "$(loc_at "$TMP/dead.sums" 331)" ] && [ "$(loc_at "$TMP/dead.sums" 480)" = 1 ] \
+    && ok "player 2 leaves after player 1 died and started again: the level goes on for player 1" \
+    || bad "player 2 leaves after player 1 respawned: the level did not go on"
 
 # The last level with all four ship parts: the ending plays, then the game tells the server it is done.
 python3 - "$TMP/ending.netlog" <<'PY'

@@ -54,8 +54,12 @@ and Caddy settings, along with the installer's options and where everything live
   where your partner's is. A browser that lost its game can **Rejoin** as the same player.
 - If your partner leaves or drops, the game pauses and offers **Continue single player**; anybody
   can take the seat again later.
-- Co-op has no lives: a level is done once nobody is left in it and at least one of you walked out
-  of the exit, and restarts if everybody died. Hold **R** to vote to restart a level; **Esc** opens a menu
+- Co-op has no lives: a Keen that dies starts again at the beginning of the level, and the level
+  goes on. It is done once one of you has walked out of the exit and the other has too (or dies
+  after that); the screen tells you when your partner is out. You hear your partner's sounds only
+  while they are on your screen, except deaths, doors opening and the exit door. Press **C** to
+  chat: type a line and press Enter; both of you see it for 15 seconds. Hold **R** to vote to
+  restart a level; **Esc** opens a menu
   where **M** votes to return to the world map and **L** leaves the game. A level starts when both
   players press jump on its entrance on the world map.
 - **F5 on the world map** saves the game on the server under a name; **Load game** in the lobby
@@ -80,6 +84,7 @@ The [operator guide](docs/guide.md#playing-on-the-server) has the details.
 | F1, F2, F3 | help, sound on/off, redefine keys (F1 and F3 on the world map only) |
 | F5 | save the game (on the world map) |
 | R, held half a second | vote to restart the level |
+| C | chat (online): type a line, Enter sends it, Esc cancels |
 | Esc | menu: return-to-map vote, leave the game |
 
 Key settings are kept in the browser, per browser and per address.

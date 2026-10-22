@@ -537,7 +537,7 @@ void kill_keen(obj_t *k)
     k->xv = 0;
     k->timer = 0;
     k->sprite = 0x16;
-    snd_play(8);
+    snd_play_always(8);                 /* a partner's death is heard wherever he is */
 }
 
 /* 0x4335: Keen fell out of the level (inside his think). */
@@ -552,7 +552,7 @@ static void keen_fell(void)
     objs[plr - players].xv = 0;
     cur.timer = 0;
     cur.sprite = 0x16;
-    snd_play(8);
+    snd_play_always(8);
 }
 
 /* 0x33EE: keep Keen inside the level, kill him below it. */
@@ -573,7 +573,7 @@ static void keen_bounds(void)
         cur.yv = 0;
         cur.y = scrollmin_y;
     } else if (cur.y > keendeath_y) {
-        snd_play(0x1b);
+        snd_play_always(0x1b);
         snd_wait();
         keen_fell();
     }
@@ -941,6 +941,29 @@ void keen_exit_walk(void)
     }
 }
 
+/* Co-op: a Keen whose death animation has finished starts again where the
+ * level starts, with the level and the shared record as they are. */
+static int keen_respawn(void)
+{
+    int32_t x, y;
+    if (coop_anyone_exited() || !coop_level_start(&x, &y))
+        return 0;                       /* somebody is out: this death ends the level */
+    int p = (int)(plr - players);
+    memset(&cur, 0, sizeof cur);
+    cur.type = OT_KEEN;
+    cur.active = 1;
+    cur.x = x;
+    cur.y = y;
+    cur.think = keen_walk;
+    cur.touch = keen_touch;
+    cur.sprite = 4;
+    plr->facing = 1;
+    plr->invuln = 0;
+    objs[p] = cur;                      /* camera_start looks at the object */
+    camera_start(p);
+    return 1;
+}
+
 /* 0x4281: dying animation */
 void keen_dying(void)
 {
@@ -954,6 +977,8 @@ void keen_dying(void)
     cur.dx = cur.xv * tics;
     cur.dy = cur.yv * tics;
     if (cur.y2 < plr->cam_y) {          /* off the top of his own view */
+        if (game.coop && keen_respawn())
+            return;
         cur.type = 0;
         plr->status = PS_DEAD;
     }
@@ -1167,7 +1192,7 @@ static void switch_activate(void)
 /* 0x2863: open a keycard door at tile (tx, ty). */
 static void open_door(int tx, int ty)
 {
-    snd_play(0x21);
+    snd_play_always(0x21);              /* heard by everyone: the way is open */
     int b = T_BEHAV(tile_at(tx, ty));
     int above = T_BEHAV(tile_at(tx, ty - 1));
     int top = above == b ? ty - 1 : ty;
@@ -1238,7 +1263,7 @@ static void keen_tiles(int i)
                 break;
             case 17:
                 if (k->think == keen_walk) {
-                    snd_play(0xf);
+                    snd_play_always(0xf);   /* heard by everyone, like a death */
                     k->think = keen_exit_walk;
                     k->touch = touch_none;
                     k->timer = tx + 2;
@@ -1355,6 +1380,22 @@ void draw_camera(void)
     }
 }
 
+/* In a level each player hears only what happens on his own screen (with a
+ * tile to spare): every sound has a source, set before its object thinks or
+ * touches. His own Keen is always heard; deaths, doors and the exit door
+ * are heard by everybody (snd_play_always). Sound is not game state. */
+static int heard_at(int32_t x, int32_t y)
+{
+    const player_t *p = &players[local_player];
+    return x > p->cam_x - 0x1000 && x < p->cam_x + 0x15000 &&
+           y > p->cam_y - 0x1000 && y < p->cam_y + 0xd800;
+}
+
+static void snd_source(const obj_t *o)
+{
+    snd_muted = game.coop && o != &objs[local_player] && !heard_at(o->x, o->y);
+}
+
 static int play_level_run(int num)
 {
     /* The Keens' old positions survive (actors spawned before the start
@@ -1454,6 +1495,7 @@ static int play_level_run(int num)
             cur = *o;
             if (i < nplayers)
                 cur_plr = &players[i];
+            snd_source(o);
             if (!cur.active) {
                 int tx = cur.x >> 12, ty = cur.y >> 12;
                 /* Wakes when it enters any player's camera view. */
@@ -1492,7 +1534,9 @@ static int play_level_run(int num)
             for (int j = i + 1; j < numobjs; j++) {
                 obj_t *b = &objs[j];
                 if (b->type && b->active && touching(a, b)) {
+                    snd_source(a);
                     a->touch(a, b);
+                    snd_source(b);
                     b->touch(b, a);
                 }
             }
@@ -1506,11 +1550,17 @@ static int play_level_run(int num)
             if (objs[i].type && objs[i].active)
                 draw_obj(&objs[i], i);
         for (int i = 0; i < nplayers; i++)
-            if (objs[i].type)
+            if (objs[i].type) {
+                snd_source(&objs[i]);
                 keen_tiles(i);
+            }
         for (int i = 0; i < numspecs; i++)
-            if (specs[i].active)
+            if (specs[i].active) {
+                /* Only the ice cannons make sounds; they keep tile coordinates. */
+                snd_muted = game.coop && !heard_at((int32_t)specs[i].x << 12, (int32_t)specs[i].y << 12);
                 specs[i].think(&specs[i]);
+            }
+        snd_muted = 0;
         if (game.coop)
             coop_tick();
         frame_refresh();

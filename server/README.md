@@ -107,23 +107,24 @@ closes the connection.
 
 ### Browser to server
 
-| Type       | Fields                   | Meaning                                                                                                                    |
-| ---------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `hello`    | `v`, `build`             | First message. Protocol version and build id.                                                                              |
-| `create`   |                          | Start a new game; the sender is player 1 and waits for player 2.                                                           |
-| `load`     | `save`                   | Start a new game from the save with that id (the sender is player 1 and waits for player 2).                               |
-| `save`     | `name`, `rec`            | Store the shared game record (`rec`, 92 bytes in base64) under `name` (1 to 20 printable characters). Answered by `saved`. |
-| `score`    | `name`, `score`, `parts` | The team name for the high score table, from the seat `ended` named. `parts` is 0 to 15.                                   |
-| `join`     | `game`, `token?`         | Take an open seat in a game. With the `token` of a seat the sender had before, that seat is taken if it is open.           |
-| `single`   |                          | The waiting player chooses Play single player: the game starts with one Keen.                                              |
-| `leave`    |                          | Leave the game (the Esc menu): the seat opens, as for a disconnect.                                                        |
-| `input`    | `f`, `b`                 | The sender's input `b` for frame `f`.                                                                                      |
-| `sum`      | `f`, `c`, `l`, `s?`      | Checksum `c` of the state before frame `f`; `l` is where the game is (0 map, n level n); `s` is the shared score.          |
-| `ready`    | `f`                      | A joining browser has restored its snapshot and caught up; it is about to simulate frame `f`.                              |
-| `continue` |                          | Continue single player, after the other player left.                                                                       |
-| `ending`   |                          | The ending cinematic started: no inputs come until `finished`.                                                             |
-| `finished` |                          | The ending is over. When every player has said so the game moves on to the high score table (`ended`).                     |
-| `ping`     | `c`                      | Answered by `pong` with the same `c`; the browser measures its round trip with it.                                         |
+| Type       | Fields                   | Meaning                                                                                                                                            |
+| ---------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hello`    | `v`, `build`             | First message. Protocol version and build id.                                                                                                      |
+| `create`   |                          | Start a new game; the sender is player 1 and waits for player 2.                                                                                   |
+| `load`     | `save`                   | Start a new game from the save with that id (the sender is player 1 and waits for player 2).                                                       |
+| `save`     | `name`, `rec`            | Store the shared game record (`rec`, 92 bytes in base64) under `name` (1 to 20 printable characters). Answered by `saved`.                         |
+| `score`    | `name`, `score`, `parts` | The team name for the high score table, from the seat `ended` named. `parts` is 0 to 15.                                                           |
+| `join`     | `game`, `token?`         | Take an open seat in a game. With the `token` of a seat the sender had before, that seat is taken if it is open.                                   |
+| `single`   |                          | The waiting player chooses Play single player: the game starts with one Keen.                                                                      |
+| `leave`    |                          | Leave the game (the Esc menu): the seat opens, as for a disconnect.                                                                                |
+| `input`    | `f`, `b`                 | The sender's input `b` for frame `f`.                                                                                                              |
+| `sum`      | `f`, `c`, `l`, `s?`      | Checksum `c` of the state before frame `f`; `l` is where the game is (0 map, n level n); `s` is the shared score.                                  |
+| `ready`    | `f`                      | A joining browser has restored its snapshot and caught up; it is about to simulate frame `f`.                                                      |
+| `continue` |                          | Continue single player, after the other player left.                                                                                               |
+| `ending`   |                          | The ending cinematic started: no inputs come until `finished`.                                                                                     |
+| `finished` |                          | The ending is over. When every player has said so the game moves on to the high score table (`ended`).                                             |
+| `chat`     | `text`                   | A chat line (1 to 32 printable ASCII characters) for everybody in the game; the server sends it on as `chat`. Five lines per ten seconds per seat. |
+| `ping`     | `c`                      | Answered by `pong` with the same `c`; the browser measures its round trip with it.                                                                 |
 
 Binary, browser to server: `[kind u8][frame u32 le][checksum u32 le][snapshot ...]`. Kind 1 is a
 **checkpoint** for `frame` (it counts once every player reported the same checksum for that frame).
@@ -150,6 +151,7 @@ Kind 2 is the **resync** snapshot the server asked for with `snap`.
 | `resumed` |                                      | The game runs again.                                                                                                                                                                                                                                             |
 | `ended`   | `entry`                              | The ending is over. `entry` is the seat to type the team name, or -1 when the table is final (or no name is wanted): show it, then `leave`. Sent again with -1 once a name is stored.                                                                            |
 | `left`    |                                      | The sender is out of its game (it left, or was dropped) and back in the lobby.                                                                                                                                                                                   |
+| `chat`    | `seat`, `text`                       | A chat line from `seat`, to every player in the game (the sender too). Not game state: it never touches the frames.                                                                                                                                              |
 | `pong`    | `c`                                  | Answer to `ping`.                                                                                                                                                                                                                                                |
 
 Binary, server to browser: `[1][frame u32 le][snapshot ...]`, the snapshot of a `restore`.

@@ -46,3 +46,20 @@ blocking windows SHALL behave as before.
 #### Scenario: Classic statue window
 - **WHEN** a non-co-op game touches a statue
 - **THEN** the original window appears and waits for a key
+
+### Requirement: Chat in online games
+In an online game, pressing C SHALL open a chat prompt for that player only, as an overlay that
+does not pause the game (the player's Keen stands still while it is open). Enter SHALL send the
+typed line (1 to 32 printable characters) and Esc SHALL cancel it. A sent line SHALL be shown at
+the top of every player's screen in the game, the sender's included, tagged with the sender's
+player number, for 15 seconds, the newest three at a time. Chat SHALL travel through the server
+beside the sealed frames and never be part of the game state; the server SHALL pass a line only to
+players in the sender's game and SHALL drop lines beyond five per seat in ten seconds.
+
+#### Scenario: Line seen by both
+- **WHEN** player 1 presses C, types "come here" and presses Enter
+- **THEN** both players see "P1: come here" at the top of their screens for 15 seconds while both games keep running
+
+#### Scenario: Cancelled line
+- **WHEN** player 2 presses C, types a few letters and presses Esc
+- **THEN** nothing is sent and player 2's Keen can move again

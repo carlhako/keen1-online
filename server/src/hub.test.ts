@@ -205,3 +205,49 @@ describe('starting a game', () => {
     expect(hub.games.size).toBe(0);
   });
 });
+
+describe('chat', () => {
+  it('passes a line to everybody in the game, the sender too, and not to the lobby', () => {
+    hub = makeHub();
+    const [a, b] = startedGame(hub);
+    const watcher = client(hub);
+    send(hub, b, { t: 'chat', text: 'over here' });
+    expect(a.last('chat')).toEqual({ t: 'chat', seat: 1, text: 'over here' });
+    expect(b.last('chat')).toEqual({ t: 'chat', seat: 1, text: 'over here' });
+    expect(watcher.all('chat')).toEqual([]);
+  });
+
+  it('ignores a line from somebody in the lobby', () => {
+    hub = makeHub();
+    const [a] = startedGame(hub);
+    const loner = client(hub);
+    send(hub, loner, { t: 'chat', text: 'hello?' });
+    expect(a.all('chat')).toEqual([]);
+    expect(loner.closed).toBe(false);
+  });
+
+  it('refuses lines that are too long or not printable', () => {
+    hub = makeHub();
+    const [a, b] = startedGame(hub);
+    send(hub, a, { t: 'chat', text: 'x'.repeat(33) });
+    send(hub, a, { t: 'chat', text: 'tab\there' });
+    send(hub, a, { t: 'chat', text: '' });
+    expect(b.all('chat')).toEqual([]);
+  });
+
+  it('drops lines beyond five in ten seconds', () => {
+    hub = makeHub();
+    const [a, b] = startedGame(hub);
+    for (let i = 0; i < 7; i++) send(hub, a, { t: 'chat', text: `line ${i}` });
+    expect(b.all('chat').map((m) => m.text)).toEqual([
+      'line 0',
+      'line 1',
+      'line 2',
+      'line 3',
+      'line 4',
+    ]);
+    vi.advanceTimersByTime(10_000);
+    send(hub, a, { t: 'chat', text: 'later' });
+    expect(b.last('chat')?.text).toBe('later');
+  });
+});

@@ -263,15 +263,21 @@ state they use (`game_t`) is part of every snapshot and checksum. Without `--loc
 
 - There are no lives and no lives counter: losing a level never ends the game and score
   never earns an extra Keen. The cheats are off.
-- Each player is alive, dead or exited. A Keen is dead when his death animation ends and
-  exited when he walks through the exit door. A dead or exited player's screen follows the
+- Each player is alive, dead or exited. A Keen whose death animation ends starts again,
+  alive, at the level's start marker (with his camera); the level, its enemies and the shared
+  record stay as they are. Only once somebody has exited is a death final: that Keen is dead.
+  A Keen is exited when he walks through the exit door, and the others see "PLAYER N HAS
+  FINISHED THE LEVEL" at the top. A dead or exited player's screen follows the
   lowest-numbered player still alive.
 - The level succeeds when nobody is alive and at least one player exited: it is marked done,
-  what was collected is kept, and everybody returns to the map. It fails when everybody is
-  dead (nobody exited) and restarts at once.
+  what was collected is kept, and everybody returns to the map.
 - The shared record (score, ammo, keycards, ship parts, pogo, completed levels) is rolled
-  back to how it was when the level started whenever the level fails, restarts by vote or is
-  left by vote, so a ship part picked up in a level you lose is back in the level.
+  back to how it was when the level started whenever the level restarts by vote or is left
+  by vote, so a ship part picked up in a level you restart is back in the level.
+- Each player hears only what happens on his screen: every sound in a level has a source (the
+  object thinking or touching, the Keen on a tile, the cannon), and `snd_muted` is set while it
+  is off the local camera. His own Keen is always heard, and a Keen dying, a door opening and the
+  exit door are heard by everybody (`snd_play_always`). Sound is not game state.
 - Any player, alive or not, votes to restart by holding R for half a second (player 2 in
   `--local2` uses Y); doing it again withdraws the vote. When every player has voted the
   level fails and restarts (with one player, at once).
@@ -290,7 +296,9 @@ everybody for about five seconds; the castle switch shakes every screen under a 
 the level ends 80 frames later. The status screen (Space) opens only for the player who
 pressed it, over the game, and closes on his next Space or button press; while it is open
 his Keen stands still. Banners are game state (every machine shows the same ones on the same
-frames); overlays are local.
+frames); overlays are local. Online, C opens a chat prompt (an overlay like the others); the
+line goes to the server as a `chat` message beside the frames, comes back to every player in
+the game and shows at the top for 15 seconds. Chat is not game state.
 
 **On the world map**
 

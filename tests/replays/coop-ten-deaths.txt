@@ -1,5 +1,5 @@
-# Co-op level 1: both players fall out of the level ten times in a row. Every time the level
-# restarts at once and the game goes on (no lives); the eleventh start is stopped after 20 frames.
+# Co-op level 1: both players fall out of the level ten times. Each time they start again where
+# the level starts and the level goes on (no lives, no restart).
 players 2
 coop 1
 seed 100
@@ -8,72 +8,22 @@ level 1
 0 2 8 0 0
 warp 5 1 5 120
 warp 5 2 5 120
-end 900
-seed 101
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 102
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 103
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 104
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 105
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 106
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 107
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 108
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 109
-level 1
-0 1 8 0 0
-0 2 8 0 0
-warp 5 1 5 120
-warp 5 2 5 120
-end 900
-seed 110
-level 1
-0 1 8 0 0
-0 2 8 0 0
-end 20
+warp 305 1 5 120
+warp 305 2 5 120
+warp 605 1 5 120
+warp 605 2 5 120
+warp 905 1 5 120
+warp 905 2 5 120
+warp 1205 1 5 120
+warp 1205 2 5 120
+warp 1505 1 5 120
+warp 1505 2 5 120
+warp 1805 1 5 120
+warp 1805 2 5 120
+warp 2105 1 5 120
+warp 2105 2 5 120
+warp 2405 1 5 120
+warp 2405 2 5 120
+warp 2705 1 5 120
+warp 2705 2 5 120
+end 3100

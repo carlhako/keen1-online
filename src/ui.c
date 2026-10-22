@@ -661,9 +661,10 @@ void help_screen(void)
  * Banners are drawn from the game state, so every player sees the same ones
  * at the same time; they never pause the game. Overlays (status, ship, the Esc
  * menu) are local: the game goes on, and while one is open the player's input
- * is neutral so the Keen stands still. */
+ * is neutral so the Keen stands still. Online, C opens the chat prompt the
+ * same way; chat lines come back from the server and show for a while. */
 
-enum { OV_NONE, OV_STATUS, OV_SHIP, OV_ESC };
+enum { OV_NONE, OV_STATUS, OV_SHIP, OV_ESC, OV_CHAT };
 static int ov_kind;                     /* the local overlay that is open */
 static int ov_closing;                  /* closed, input stays neutral until the buttons are up */
 static int ov_prev_btn, ov_prev_space;  /* last frame's state, for press edges */
@@ -672,6 +673,17 @@ static int pending_ev[MAXPLAYERS];      /* events queued by the UI for the next 
 static int restart_hold[MAXPLAYERS];    /* frames the restart key has been held */
 
 #define RESTART_HOLD_FRAMES 12          /* half a second */
+
+#define CHAT_MAX 32                     /* as the server allows */
+#define CHAT_LINES 3                    /* the newest lines shown at once */
+#define CHAT_MS 15000                   /* how long a line stays up */
+static char chat_buf[CHAT_MAX + 1];     /* the line being typed */
+static int chat_len;
+static struct {
+    int seat;
+    char text[CHAT_MAX + 1];
+    uint32_t until;                     /* plat_ms() when it goes; 0 for an empty slot */
+} chat_lines[CHAT_LINES];
 
 void ui_emit(int p, int events)
 {
@@ -717,6 +729,25 @@ static void overlay_input(ctrl_t *c)
         case OV_SHIP:
             if (btn_edge || space_edge || (k >> 8) == 0x01)
                 ov_close();
+            break;
+        case OV_CHAT:
+            /* Every key typed goes into the line (plat_text_key keeps them all); Enter sends it. */
+            for (int t; ov_kind == OV_CHAT && (t = plat_text_key()) != 0;) {
+                int sc = t >> 8, ch = t & 0xff;
+                if (sc == 0x01) {
+                    ov_close();
+                } else if (sc == 0x1c) {
+                    if (chat_len)
+                        net_chat_send(chat_buf);
+                    ov_close();
+                } else if (sc == 0x0e) {
+                    if (chat_len)
+                        chat_buf[--chat_len] = 0;
+                } else if (ch >= 0x20 && ch < 0x7f && chat_len < CHAT_MAX) {
+                    chat_buf[chat_len++] = (char)ch;
+                    chat_buf[chat_len] = 0;
+                }
+            }
             break;
         case OV_ESC:
             if (k) {
@@ -782,6 +813,15 @@ int ui_poll_coop(void)
     case 0x3c:
         key_get();
         snd_enabled ^= 1;
+        return 0;
+    case 0x2e:
+        if (net_online) {
+            key_get();
+            plat_text_clear();          /* the C itself is not part of the line */
+            chat_len = 0;
+            chat_buf[0] = 0;
+            ov_open(OV_CHAT);
+        }
         return 0;
     case 0x3b:
     case 0x3d:
@@ -929,6 +969,19 @@ static void edge_arrow(int32_t wx, int32_t wy)
         }
 }
 
+/* Chat lines that arrived from the server go into the shown list, the oldest out first. */
+static void chat_poll(void)
+{
+    char text[CHAT_MAX + 1];
+    int seat;
+    while ((seat = net_chat_take(text, sizeof text)) >= 0) {
+        memmove(&chat_lines[0], &chat_lines[1], sizeof chat_lines[0] * (CHAT_LINES - 1));
+        chat_lines[CHAT_LINES - 1].seat = seat;
+        snprintf(chat_lines[CHAT_LINES - 1].text, sizeof chat_lines[0].text, "%s", text);
+        chat_lines[CHAT_LINES - 1].until = plat_ms() + CHAT_MS;
+    }
+}
+
 void ui_overlay_hook(void)
 {
     /* Windows sit on the 8 pixel text grid, not on the scrolled picture. */
@@ -951,6 +1004,21 @@ void ui_overlay_hook(void)
     if (game.map_votes) {
         vote_text(text, sizeof text, game.map_votes, "RETURN TO THE MAP");
         strip(row++, text);
+    }
+    if (!in_world_map)
+        for (int p = 0; p < nplayers; p++)
+            if (p != local_player && players[p].status == PS_EXITED) {
+                snprintf(text, sizeof text, "PLAYER %d HAS FINISHED THE LEVEL", p + 1);
+                strip(row++, text);
+            }
+    if (net_online) {
+        chat_poll();
+        uint32_t now = plat_ms();
+        for (int i = 0; i < CHAT_LINES; i++)
+            if (chat_lines[i].until && (int32_t)(chat_lines[i].until - now) > 0) {
+                snprintf(text, sizeof text, "P%d: %s", chat_lines[i].seat + 1, chat_lines[i].text);
+                strip(row++, text);
+            }
     }
     if (game.req_by >= 0) {
         snprintf(text, sizeof text, "PLAYER %d WANTS TO PLAY LEVEL %d", game.req_by + 1,
@@ -978,6 +1046,13 @@ void ui_overlay_hook(void)
     case OV_SHIP:
         ship_paint(0);
         break;
+    case OV_CHAT: {
+        char lines[1][40];
+        snprintf(lines[0], 40, "SAY: %-*s", CHAT_MAX + 1, chat_buf);   /* room for the cursor */
+        lines[0][5 + chat_len] = (gtick >> 4) & 1 ? '_' : ' ';     /* the cursor */
+        message_box((const char (*)[40])lines, 1);
+        break;
+    }
     case OV_ESC: {
         char lines[4][40];
         int n = 0;

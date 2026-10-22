@@ -4,6 +4,8 @@ import type { ServerConfig } from './config.ts';
 import { printable, recordScore } from './saves.ts';
 import { SCORE_NAME_MAX, type ScoreStore } from './scores.ts';
 import {
+  CHAT_RATE,
+  CHAT_WINDOW_MS,
   encodeRestore,
   INPUT_HORIZON,
   NEUTRAL_INPUT,
@@ -130,6 +132,8 @@ export class Game {
   /** The ending is playing: no inputs come, so nobody times out. */
   private inEnding = false;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When each seat sent its recent chat lines, for the rate limit. */
+  private chatTimes = new Map<number, number[]>();
   private logFile: string | null = null;
 
   constructor(
@@ -498,6 +502,24 @@ export class Game {
       this.announceEnded();
     }
     this.deps.changed();
+  }
+
+  /**
+   * A chat line from a seat, passed on to everybody in the game (the sender too, so the line shows
+   * once it is through). Returns false when it is dropped: an empty seat, or too many lines lately.
+   */
+  chat(seatNo: number, text: string): boolean {
+    const mode = this.seats[seatNo]?.mode;
+    if (mode === undefined || mode === 'open') return false;
+    const now = this.deps.now();
+    const recent = (this.chatTimes.get(seatNo) ?? []).filter((t) => now - t < CHAT_WINDOW_MS);
+    if (recent.length >= CHAT_RATE) return false;
+    recent.push(now);
+    this.chatTimes.set(seatNo, recent);
+    for (const s of this.seats) {
+      if (s.mode !== 'open') s.player?.send({ t: 'chat', seat: seatNo, text });
+    }
+    return true;
   }
 
   /** Removes the game; whoever is still in it is back in the lobby. */

@@ -87,6 +87,8 @@ typedef struct {
     int (*ended)(void);                         /* -2 not yet, else the seat typing the team name or -1 */
     void (*submit_score)(const char *name, int32_t score, int parts);
     int (*scores)(net_score_t *rows);           /* 1 when the server's table is there */
+    void (*chat_send)(const char *text);
+    int (*chat_take)(char *text, int max);      /* a chat line that arrived: its seat, or -1 */
 } backend_t;
 
 enum { NE_ENDING = 1, NE_FINISHED = 2, NE_LEAVE = 3 };
@@ -207,6 +209,18 @@ EM_JS(int, js_scores, (uint8_t *dst), {
     return 1;
 });
 
+EM_JS(void, js_chat_send, (const char *text), { Module.net.chat(UTF8ToString(text)); });
+EM_JS(int, js_chat_take, (char *dst, int max), {
+    var m = Module.net.takeChat();
+    if (!m)
+        return -1;
+    var n = Math.min(m.text.length, max - 1);
+    for (var i = 0; i < n; i++)
+        HEAPU8[dst + i] = m.text.charCodeAt(i) & 127;
+    HEAPU8[dst + n] = 0;
+    return m.seat;
+});
+
 EM_JS(int, js_local_input, (uint32_t f), {
     return Module.net.botInput ? Module.net.botInput(f >>> 0) : -1;
 });
@@ -266,6 +280,7 @@ static const backend_t browser = {
     .command = js_command, .command_arg = js_command_arg, .boot_record = js_boot_record,
     .game_id = js_game_id, .save = b_save, .save_result = js_save_result, .ended = js_ended,
     .submit_score = js_submit_score, .scores = (int (*)(net_score_t *))js_scores,
+    .chat_send = js_chat_send, .chat_take = js_chat_take,
 };
 #endif /* NET_BROWSER */
 
@@ -492,6 +507,8 @@ static void l_submit_score(const char *name, int32_t score, int parts)
     printf("netlog: high score %d \"%s\" parts %d\n", (int)score, name, parts);
 }
 static int l_scores(net_score_t *rows) { (void)rows; return 0; }
+static void l_chat_send(const char *text) { (void)text; }
+static int l_chat_take(char *text, int max) { (void)text; (void)max; return -1; }
 
 static int l_boot_record(uint8_t *dst)
 {
@@ -506,7 +523,8 @@ static const backend_t logfile __attribute__((unused)) = {
     .duty = zero, .lead = two, .checkpoint_frames = l_cp, .event = l_event, .local_input = l_input,
     .command = l_command, .command_arg = l_command_arg, .boot_record = l_boot_record,
     .game_id = l_game_id, .save = l_save, .save_result = l_save_result, .ended = l_ended,
-    .submit_score = l_submit_score, .scores = l_scores,
+    .submit_score = l_submit_score, .scores = l_scores, .chat_send = l_chat_send,
+    .chat_take = l_chat_take,
 };
 
 /* Command-line options of the log backend (main.c). */
@@ -955,6 +973,18 @@ void net_submit_score(const char *name, int32_t score, int parts)
 int net_scores(net_score_t *rows)
 {
     return be && be->scores(rows);
+}
+
+/* Chat goes through the server beside the frames: it is not game state. */
+void net_chat_send(const char *text)
+{
+    if (be)
+        be->chat_send(text);
+}
+
+int net_chat_take(char *text, int max)
+{
+    return be ? be->chat_take(text, max) : -1;
 }
 
 /* Nothing more to do: the page returns to the lobby by itself. */
