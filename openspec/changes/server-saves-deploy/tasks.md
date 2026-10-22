@@ -27,8 +27,8 @@ run with `npm test` in `server/`.
 
 ## 4. Installer and service
 
-- [ ] 4.1 Adapt `deploy/install.sh` from `locomotive-wars` (user, Node 22, releases under `/opt/keen1-online`, config written once to `/etc/keen1-online/config.json`, optional `/etc/keen1-online/env`, data in `/var/lib/keen1-online`, systemd unit, health check of `/` and `/ws`, rollback, `RELEASE_TAG` / `KO_TARBALL` / `KO_FORCE`); verify a fresh install in a test Debian LXC (or container) serves the lobby
-- [ ] 4.2 Verify upgrade paths in the test LXC: re-run with nothing new (no restart), upgrade to a newer release, and a deliberately broken release rolls back; saves and scores unchanged throughout
+- [x] 4.1 Adapt `deploy/install.sh` from `locomotive-wars` (user, Node 22, releases under `/opt/keen1-online`, config written once to `/etc/keen1-online/config.json`, optional `/etc/keen1-online/env`, data in `/var/lib/keen1-online`, systemd unit, health check of `/` and `/ws`, rollback, `RELEASE_TAG` / `KO_TARBALL` / `KO_FORCE`); verify a fresh install in a test Debian LXC (or container) serves the lobby
+- [x] 4.2 Verify upgrade paths in the test LXC: re-run with nothing new (no restart), upgrade to a newer release, and a deliberately broken release rolls back; saves and scores unchanged throughout
 - [ ] 4.3 Document install, upgrade, config keys, data paths, and nginx and Caddy reverse-proxy settings (WebSocket upgrade on `/ws`, idle timeout) in `README.md`; verify the documented commands run as written in the test LXC
 
 ## 5. Integration check
