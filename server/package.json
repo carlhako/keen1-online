@@ -1,6 +1,6 @@
 {
   "name": "keen1-online-server",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Lobby and lockstep relay for Commander Keen 1 online co-op",

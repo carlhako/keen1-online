@@ -4,6 +4,27 @@ Each released version has a section headed `## <version> - <date>`. The release 
 publishes that section as the GitHub release notes. A tag without a section here is not published,
 so add the entry with the version bump.
 
+## 0.4.0 - 2026-10-22
+
+### What's new
+
+- **A wider view of levels and the world map.** The picture now uses the window: from the original
+  320 pixels up to 1.5 times as wide (480), with each pixel keeping its 4:3 CRT shape. A 16:9
+  window shows about 427 pixels across, an ultrawide window gets black bars at the sides, and a
+  window narrower than 4:3 gets bars above and below, as before. The game itself does not change:
+  the camera, where enemies wake, and everything else stay as in the original, so players with
+  different window sizes can share a game.
+- **Enemies are visible before they wake.** An enemy that has not woken yet is drawn standing
+  still where it is, and starts to move at the original distance.
+- **Level edges stay hidden.** The view never shows past what the original could scroll to. The
+  20 tile wide levels (2, 5 and 6) are centered with black on both sides.
+- **You hear what you see.** In co-op a partner's or an enemy's sound is heard while its source is
+  inside the view you actually see.
+- **The page fills the window.** The lobby and the paused, finished and waiting screens now cover
+  the whole browser window instead of a 4:3 box. Menus, story, help and other full-screen pictures
+  stay 320 wide, centered; windows over a level (status, menus, messages, chat) are centered in the
+  wider view.
+
 ## 0.3.1 - 2026-10-22
 
 ### What's new
