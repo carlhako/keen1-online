@@ -13,6 +13,10 @@ export interface ServerOptions {
   log?: (message: string) => void;
   /** Debug option: write one frame log per game into this directory. */
   frameLogDir?: string;
+  /** Where saves and high scores are kept; without it they live in memory only (tests). */
+  dataDir?: string;
+  /** The release version, reported by `/healthz` so an installer can tell which one answered. */
+  version?: string;
 }
 
 /** Seconds between WebSocket pings. They keep idle sockets open behind a proxy. */
@@ -37,6 +41,7 @@ export class GameServer {
       buildId: this.buildId,
       log: opts.log,
       frameLogDir: opts.frameLogDir,
+      dataDir: opts.dataDir,
     });
     this.http = createServer(
       createHttpHandler({
@@ -45,6 +50,7 @@ export class GameServer {
           games: this.hub.games.size,
           players: this.hub.playerCount,
           buildId: this.buildId(),
+          version: opts.version,
         }),
       }),
     );

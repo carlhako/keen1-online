@@ -4,5 +4,6 @@
   "inputLeadMax": 6,
   "disconnectSec": 15,
   "emptyGameSec": 60,
-  "checkpointFrames": 240
+  "checkpointFrames": 240,
+  "dataDir": "data"
 }

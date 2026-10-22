@@ -20,6 +20,8 @@ Module.net = (function () {
     game: null,                 // {id, seat, token, phase} once joined
     duty: false,                // this browser uploads checkpoints
     paused: null,               // seats that left, while the game waits for Continue
+    saves: [],                  // the saves on the server, newest first
+    scores: null,               // the high score table: 7 rows of {score, name, parts}
     rtt: 0,                     // round trip, ms (smoothed)
     onchange: function () {},   // the page redraws when this is called
     onboot: function () {},     // boot information arrived: the page may start the game
@@ -34,6 +36,8 @@ Module.net = (function () {
   var pendingRestore = null;    // a restore that arrived while the game runs
   var snapWanted = false;
   var golive = -1;
+  var saveResult = -1;          // the answer to our last save: -1 waiting, 0 refused, 1 stored
+  var endedQueue = [];          // `ended` messages not yet taken by the game
   var rttSamples = [];
   var waitStart = 0;
   var lastSentPing = 0;
@@ -117,14 +121,23 @@ Module.net = (function () {
       writeTokens(t);
       net.state = m.phase === 'waiting' ? 'waiting' : 'playing';
       break;
+    case 'saves':
+      net.saves = m.saves;
+      break;
+    case 'saved':
+      saveResult = m.ok ? 1 : 0;
+      break;
+    case 'scores':
+      net.scores = m.rows;
+      break;
     case 'start':
-      newBoot({ f: 0, fresh: true, seed: m.seed, mask: m.mask });
+      newBoot({ f: 0, fresh: true, seed: m.seed, mask: m.mask, rec: decodeRecord(m.rec) });
       boot.ready = true;
       net.state = 'playing';
       net.onboot();
       break;
     case 'restore':
-      var info = { f: m.f, fresh: m.fresh, seed: m.seed, mask: m.mask, snap: null, ready: m.fresh, joiner: true };
+      var info = { f: m.f, fresh: m.fresh, seed: m.seed, mask: m.mask, snap: null, ready: m.fresh, joiner: true, rec: decodeRecord(m.rec) };
       frames = {};
       head = m.f - 1;
       present = m.mask;
@@ -157,6 +170,7 @@ Module.net = (function () {
       net.paused = null;
       break;
     case 'ended':
+      endedQueue.push(m.entry);
       net.ended = true;
       break;
     case 'left':
@@ -170,6 +184,20 @@ Module.net = (function () {
       return;
     }
     net.onchange();
+  }
+
+  // The game record of a loaded save comes as base64; the game wants the bytes.
+  function decodeRecord(b64) {
+    if (!b64) return null;
+    var bin = atob(b64), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function encodeBytes(bytes) {
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
   }
 
   function newBoot(info) {
@@ -226,6 +254,7 @@ Module.net = (function () {
   // ---- lobby actions ----
 
   net.create = function () { send({ t: 'create' }); };
+  net.load = function (id) { send({ t: 'load', save: id }); };
   net.join = function (id) {
     var games = net.lobby ? net.lobby.games : [];
     var open = [];
@@ -273,7 +302,22 @@ Module.net = (function () {
     }
   };
 
-  net.sum = function (f, c, loc) { send({ t: 'sum', f: f, c: c >>> 0, l: loc }); };
+  net.sum = function (f, c, loc, score) {
+    send({ t: 'sum', f: f, c: c >>> 0, l: loc, s: Math.max(0, score | 0) });
+  };
+
+  // F5 on the world map: the game record goes to the server. The answer is taken with takeSaveResult.
+  net.save = function (name, rec) {
+    saveResult = -1;
+    send({ t: 'save', name: name, rec: encodeBytes(rec) });
+  };
+  net.takeSaveResult = function () { return saveResult; };
+
+  // After the ending: the seat typing the team name (-1 for none), or -2 while the server has not said.
+  net.takeEnded = function () { return endedQueue.length ? endedQueue.shift() : -2; };
+  net.submitScore = function (name, score, parts) {
+    send({ t: 'score', name: name, score: score | 0, parts: parts | 0 });
+  };
 
   net.upload = function (kind, f, sum, data) {
     if (!ws || ws.readyState !== 1) return;

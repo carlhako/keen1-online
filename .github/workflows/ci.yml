@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # The native build, and the determinism tests that replay recorded games through it. The tests
+  # need the shareware episode, which is not in the repository: set the repository variable
+  # KEEN_SHAREWARE_URL to where `1keen.zip` (with CK1SW131.SHR) can be downloaded and they run;
+  # without it only the build is checked. The WebAssembly build is not made here (no emsdk), so
+  # releases are built locally with `make release`.
+  game:
+    name: Game
+    runs-on: ubuntu-latest
+    env:
+      KEEN_SHAREWARE_URL: ${{ vars.KEEN_SHAREWARE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsdl2-dev
+      - run: make
+      - name: Fetch the shareware data
+        if: env.KEEN_SHAREWARE_URL != ''
+        run: |
+          curl -fsSL "$KEEN_SHAREWARE_URL" -o /tmp/1keen.zip
+          unzip -q /tmp/1keen.zip -d /tmp/1keen
+          python3 tools/unshr.py "$(find /tmp/1keen -iname 'CK1SW131.SHR' | head -n1)" shareware/data
+      - name: Replay determinism tests
+        if: env.KEEN_SHAREWARE_URL != ''
+        run: SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy sh tests/run.sh
+      - name: Say why the tests did not run
+        if: env.KEEN_SHAREWARE_URL == ''
+        run: echo "::notice::KEEN_SHAREWARE_URL is not set, so the replay determinism tests were skipped"

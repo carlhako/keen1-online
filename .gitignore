@@ -18,3 +18,6 @@ analysis/code.bin
 analysis/img/
 
 __pycache__/
+
+# Release packages (make release)
+keen1-online-*.tar.gz

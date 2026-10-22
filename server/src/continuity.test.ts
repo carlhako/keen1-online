@@ -344,7 +344,7 @@ describe('leaving and ending', () => {
     expect(b.last('left')).toBeDefined();
   });
 
-  it('ends the game after both players finished the ending', () => {
+  it('moves to the table after both players finished the ending, and goes when they leave', () => {
     hub = makeHub();
     const [a, b] = startedGame(hub);
     inputs(hub, [a, b], 0, 3);
@@ -354,19 +354,26 @@ describe('leaving and ending', () => {
     vi.advanceTimersByTime(60_000);
     expect(hub.games.size).toBe(1);
     send(hub, a, { t: 'finished' });
-    expect(hub.games.size).toBe(1);
+    expect(a.last('ended')).toBeUndefined();
     send(hub, b, { t: 'finished' });
+    // The score is too low for the table: no name is asked for.
+    expect(a.last('ended')).toEqual({ t: 'ended', entry: -1 });
+    expect(b.last('ended')).toEqual({ t: 'ended', entry: -1 });
+    expect(hub.games.size).toBe(1);
+    send(hub, a, { t: 'leave' });
+    expect(hub.games.size).toBe(1);
+    send(hub, b, { t: 'leave' });
     expect(hub.games.size).toBe(0);
-    expect(a.last('ended')).toBeDefined();
-    expect(b.last('ended')).toBeDefined();
   });
 
-  it('ends a one-player game when its player finishes', () => {
+  it('ends a one-player game when its player finishes and leaves', () => {
     hub = makeHub();
     const a = client(hub);
     send(hub, a, { t: 'create' });
     send(hub, a, { t: 'single' });
     send(hub, a, { t: 'finished' });
+    expect(a.last('ended')).toEqual({ t: 'ended', entry: -1 });
+    send(hub, a, { t: 'leave' });
     expect(hub.games.size).toBe(0);
   });
 });

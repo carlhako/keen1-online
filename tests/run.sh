@@ -141,6 +141,22 @@ timeout 60 ./keen1 --data "$DATA" --netlog "$TMP/ending.netlog" > "$TMP/out.txt"
 grep -q "the ending plays" "$TMP/out.txt" && grep -q "the game finished at frame .*levels done: 1" "$TMP/out.txt" \
     && ok "all four ship parts: the ending plays and the game finishes" || bad "the ending did not play and finish"
 
+# A game loaded from a save starts from its record: score, completed levels, ship parts and map position.
+python3 - "$TMP/loaded.netlog" <<'PY'
+import struct, sys
+done = [1 if i in (0, 2) else 0 for i in range(16)]
+rec = struct.pack("<5h4h16hhhi4i8hh", 1, 0, 1, 0, 1, 0, 0, 0, 0, *done, 4, 0, 4200,
+                  21 << 12, 39 << 12, (21 << 12) - 0x9000, 0, *([0] * 8), 0)
+assert len(rec) == 92
+lines = ["# keen1-online netlog (test)", "seed 7", "mask 1", "record " + rec.hex()]
+lines += ["%d 8 8" % f for f in range(60)]
+open(sys.argv[1], "w").write("\n".join(lines) + "\n")
+PY
+./keen1 --data "$DATA" --netlog "$TMP/loaded.netlog" > "$TMP/out.txt" 2>&1
+grep -q "netlog: end at frame 60, score 4200, levels done: 1 3$" "$TMP/out.txt" \
+    && ok "a game loaded from a save starts from its record (score 4200, levels 1 and 3)" \
+    || { cat "$TMP/out.txt"; bad "a game loaded from a save did not start from its record"; }
+
 echo "native vs WebAssembly (Node)"
 if [ -f build/node/keen1.js ] && command -v node > /dev/null; then
     for r in tests/replays/*.txt; do
@@ -152,6 +168,9 @@ if [ -f build/node/keen1.js ] && command -v node > /dev/null; then
     cmp -s "$TMP/levels.net.ck" "$TMP/levels.net.wasm" && ok "online frame log: wasm == native" || bad "online frame log: wasm differs from native"
     node build/node/keen1.js --data "$DATA" --netlog "$TMP/join.netlog" --seat 2 --net-restore "$TMP/join.snap" --checksums "$TMP/join.wasm.ck" > /dev/null
     cmp -s "$TMP/join.b.ck" "$TMP/join.wasm.ck" && ok "online join from a snapshot: wasm == native" || bad "online join from a snapshot: wasm differs from native"
+    node build/node/keen1.js --data "$DATA" --netlog "$TMP/loaded.netlog" > "$TMP/out.txt" 2>&1
+    grep -q "score 4200, levels done: 1 3$" "$TMP/out.txt" && ok "a game loaded from a save: wasm == native" \
+        || bad "a game loaded from a save: wasm differs from native"
 else
     echo "  skipped (run: source ~/tools/emsdk/emsdk_env.sh && make node)"
 fi

@@ -7,6 +7,8 @@ export interface Health {
   games: number;
   players: number;
   buildId: string;
+  /** The release the server was started from (`version` in package.json), when it knows. */
+  version?: string;
 }
 
 export interface HttpOptions {

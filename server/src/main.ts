@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfigOrExit } from './config.ts';
@@ -23,10 +23,25 @@ console.log(`serving ${webDir}`);
 // which `keen1 --replay` can play back natively.
 const frameLogDir = process.env.KEEN_FRAMELOG ? resolve(process.env.KEEN_FRAMELOG) : undefined;
 if (frameLogDir) console.log(`writing frame logs to ${frameLogDir}`);
+const dataDir = resolve(config.dataDir);
+console.log(`keeping saves and high scores in ${dataDir}`);
+function readVersion(): string | undefined {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+    ) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const server = new GameServer({
   config,
+  version: readVersion(),
   webDir,
   frameLogDir,
+  dataDir,
   log: (message) => console.log(`${new Date().toISOString()} ${message}`),
 });
 const port = await server.listen();

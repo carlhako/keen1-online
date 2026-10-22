@@ -1,6 +1,8 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ServerConfig } from './config.ts';
+import { printable, recordScore } from './saves.ts';
+import { SCORE_NAME_MAX, type ScoreStore } from './scores.ts';
 import {
   encodeRestore,
   INPUT_HORIZON,
@@ -32,6 +34,9 @@ export const MAX_SNAPSHOT = 1 << 20;
 
 /** Sums that nobody compared are forgotten once the game is this many frames further. */
 const SUM_KEEP_FRAMES = 1000;
+
+/** A team name that is not typed within this long is given up on. */
+const SCORE_ENTRY_MS = 120_000;
 
 /** A snapshot that never came after a `snap` request is forgotten after this long. */
 const RESYNC_TIMEOUT_MS = 10_000;
@@ -83,6 +88,10 @@ export interface GameDeps {
   /** Called when the game is gone. */
   removed: (game: Game) => void;
   log: (message: string) => void;
+  /** The shared high score table. */
+  scores: ScoreStore;
+  /** Called when the high score table changed. */
+  scoresChanged: () => void;
   /** Debug option: a directory that receives one frame log per game. */
   frameLogDir?: string;
 }
@@ -110,6 +119,14 @@ export class Game {
   private lastSealAt = 0;
   private lastLocFrame = -1;
   private finished = new Set<number>();
+  /** The shared score at the latest report (a `sum` carries it), bounding the high score entry. */
+  private score = 0;
+  private scoreFrame = -1;
+  /** While scoring: the seat typing the team name, or -1. */
+  private entrySeat = -1;
+  private entrySince = 0;
+  /** The record this game started from (a loaded save), base64. */
+  private readonly record: string | null;
   /** The ending is playing: no inputs come, so nobody times out. */
   private inEnding = false;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -118,8 +135,11 @@ export class Game {
   constructor(
     id: number,
     private readonly deps: GameDeps,
+    record: Buffer | null = null,
   ) {
     this.id = id;
+    this.record = record ? record.toString('base64') : null;
+    if (record) this.score = recordScore(record);
     for (let i = 0; i < SEATS; i++) {
       this.seats.push({
         player: null,
@@ -180,6 +200,7 @@ export class Game {
 
   /** The seat a joiner with this token gets: its own if open, else the lowest open seat. */
   pickSeat(token?: string): number {
+    if (this.phase === 'scoring') return -1;
     const open = this.openSeats();
     if (token) {
       const own = open.find((i) => this.seats[i]?.token === token);
@@ -192,7 +213,7 @@ export class Game {
     return {
       id: this.id,
       seats: this.occupied(),
-      open: this.openSeats(),
+      open: this.phase === 'scoring' ? [] : this.openSeats(),
       phase: this.phase,
       loc: this.loc,
     };
@@ -252,12 +273,17 @@ export class Game {
     for (const s of this.seats) {
       if (s.mode === 'live') {
         s.lastInput = now;
-        s.player?.send({ t: 'start', seed: this.seed, mask });
+        s.player?.send(this.startMessage());
       }
     }
     this.deps.log(`game ${this.id} started (seed ${this.seed}, mask ${mask})`);
     this.openFrameLog();
     this.updateDuty();
+  }
+
+  private startMessage(): ServerMessage {
+    const msg = { t: 'start', seed: this.seed, mask: this.startMask } as const;
+    return this.record ? { ...msg, rec: this.record } : msg;
   }
 
   // ---- catching up ----
@@ -277,7 +303,14 @@ export class Game {
       });
       player.sendBinary(encodeRestore(cp.frame, cp.data));
     } else {
-      player.send({ t: 'restore', f: 0, fresh: true, seed: this.seed, mask: this.startMask });
+      player.send({
+        t: 'restore',
+        f: 0,
+        fresh: true,
+        seed: this.seed,
+        mask: this.startMask,
+        ...(this.record ? { rec: this.record } : {}),
+      });
     }
     for (const f of this.log) player.send(frameMessage(f));
   }
@@ -335,6 +368,10 @@ export class Game {
     seat.mode = 'open';
     seat.inputs.clear();
     this.finished.delete(seatNo);
+    if (this.phase === 'scoring') {
+      this.dropScoring(seatNo);
+      return;
+    }
     // A newcomer that had not appeared yet takes its pending events with it.
     this.scheduled = this.scheduled.filter((e) => e.by !== seatNo);
     if (this.phase === 'waiting') {
@@ -417,15 +454,50 @@ export class Game {
     if (this.phase === 'playing' && this.seats[seatNo]?.mode === 'live') this.inEnding = true;
   }
 
-  /** A player said the ending is over; when every live player has, the game is done. */
+  /**
+   * A player said the ending is over; when every live player has, the game moves on to the high
+   * score table: the lowest seat types the team name if the score qualifies.
+   */
   finish(seatNo: number): void {
     if (this.phase !== 'playing' || this.seats[seatNo]?.mode !== 'live') return;
     this.finished.add(seatNo);
     const live = this.liveSeats();
-    if (live.every((s) => this.finished.has(s))) {
-      for (const s of this.seats) s.player?.send({ t: 'ended' });
+    if (!live.every((s) => this.finished.has(s))) return;
+    this.phase = 'scoring';
+    this.inEnding = false;
+    this.entrySeat = this.deps.scores.rank(this.score) >= 0 ? Math.min(...live) : -1;
+    this.entrySince = this.deps.now();
+    this.deps.log(`game ${this.id} finished with ${this.score} points`);
+    this.announceEnded();
+    this.deps.changed();
+  }
+
+  private announceEnded(): void {
+    for (const s of this.seats) s.player?.send({ t: 'ended', entry: this.entrySeat });
+  }
+
+  /** The team name for the table. Returns false when it is refused. */
+  submitScore(seatNo: number, name: string, score: number, parts: number): boolean {
+    if (this.phase !== 'scoring' || seatNo !== this.entrySeat) return false;
+    if (!printable(name, SCORE_NAME_MAX) || score > this.score) return false;
+    if (this.deps.scores.insert({ score, name, parts }) < 0) return false;
+    this.deps.scoresChanged();
+    this.entrySeat = -1;
+    this.announceEnded();
+    return true;
+  }
+
+  /** Someone left after the ending: the game goes when the last one does. */
+  private dropScoring(seatNo: number): void {
+    if (this.occupied() === 0) {
       this.remove('finished');
+      return;
     }
+    if (seatNo === this.entrySeat) {
+      this.entrySeat = -1;
+      this.announceEnded();
+    }
+    this.deps.changed();
   }
 
   /** Removes the game; whoever is still in it is back in the lobby. */
@@ -527,6 +599,11 @@ export class Game {
     const now = this.deps.now();
     const limit = this.deps.config.disconnectSec * 1000;
     if (this.resync && now - this.resync.since > RESYNC_TIMEOUT_MS) this.resync = null;
+    if (this.phase === 'scoring' && this.entrySeat >= 0 && now - this.entrySince > SCORE_ENTRY_MS) {
+      this.deps.log(`game ${this.id}: no team name was typed`);
+      this.entrySeat = -1;
+      this.announceEnded();
+    }
     if (this.phase === 'playing' && !this.inEnding) {
       const blocked: number[] = [];
       this.seats.forEach((seat, i) => {
@@ -574,9 +651,13 @@ export class Game {
     return best;
   }
 
-  sum(seatNo: number, f: number, c: number, loc: number): void {
+  sum(seatNo: number, f: number, c: number, loc: number, score?: number): void {
     const seat = this.seats[seatNo];
     if (!seat || seat.mode !== 'live') return;
+    if (score !== undefined && f >= this.scoreFrame && f <= this.head) {
+      this.score = score;
+      this.scoreFrame = f;
+    }
     if (f >= this.lastLocFrame && f <= this.head) {
       this.lastLocFrame = f;
       const next: Location = loc === 0 ? { kind: 'map' } : { kind: 'level', level: loc };

@@ -147,7 +147,7 @@ describe('input validation', () => {
   it('treats malformed input as malformed, not as an input', () => {
     hub = makeHub();
     const [a] = startedGame(hub);
-    hub.message(a, JSON.stringify({ t: 'input', f: 0, b: 1 << 10 }));
+    hub.message(a, JSON.stringify({ t: 'input', f: 0, b: 1 << 11 }));
     hub.message(a, JSON.stringify({ t: 'input', f: 0, b: 9 }));
     hub.message(a, JSON.stringify({ t: 'input', f: 1.5, b: 1 }));
     expect(a.closed).toBe(false);

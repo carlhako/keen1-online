@@ -215,6 +215,9 @@ int main(int argc, char **argv)
     if (net_online) {
         net_boot();             /* the seed, who plays and where the game starts come from the lobby */
         game_new();
+        gamestate_t loaded;
+        if (net_start_record(&loaded))
+            game_load_record(&loaded);      /* a game loaded from a save on the server */
     }
     rng_seed(game_seed);
     set_palette_black();

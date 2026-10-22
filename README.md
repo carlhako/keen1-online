@@ -114,25 +114,25 @@ Then open <http://localhost:8080> (in two browser windows, to play both sides yo
 - The keys are the same as the native version (see [Controls](#controls)). While the
   game runs, the page keeps keys for itself: arrows and Space don't scroll, Alt
   doesn't open a browser menu, F1/F3 don't open browser help or search, and F5
-  saves the game rather than reloading the page.
+  saves the game (on the world map) rather than reloading the page.
 - Some browser shortcuts can't be blocked by a page, notably Ctrl+W (close tab),
   Ctrl+T and Ctrl+N. If you press those by accident while jumping, use F3 in the game
   to move jump and pogo to other keys.
 - Use the browser's own full screen (F11) for a bigger picture. The game fills the
   window at 4:3 with sharp pixels.
-- High scores, key settings and saved games are stored in the browser's IndexedDB
-  and survive reloads and restarts. They belong to that browser and that address:
-  another browser, a private window, or a different host or port starts empty.
-  Clearing the site's data in the browser settings resets them.
+- Key settings are stored in the browser's IndexedDB and survive reloads and restarts. They
+  belong to that browser and that address: another browser, a private window, or a different
+  host or port starts empty. Saved games and high scores of online games live on the server
+  instead (see [Playing online](#playing-online)).
 - When the game stops (it crashed, or the connection to the server was lost) a *Thanks for
   playing* screen is shown; *Play again* reloads the page, back to the lobby.
 
 ### Putting it on a website
 
 The page is the lobby of an online game, so it needs the server in `server/` behind it:
-a static web host is not enough. Put a reverse proxy with TLS in front of the server and
-let it pass WebSocket upgrades on `/ws` (and keep idle connections open: the server pings
-every 10 seconds). The whole game is about 1.5 MB.
+a static web host is not enough. See [Running a server](#running-a-server) for installing it on a
+Debian server or Proxmox LXC and putting a TLS reverse proxy in front. The whole game is about
+1.5 MB.
 
 ### How the web port works
 
@@ -169,10 +169,188 @@ and where they are (the world map or a level). The server runs at most 5 games a
   on by itself when their inputs arrive again (after 15 seconds they are dropped).
 - Esc opens the menu: **L** leaves the game (the lobby shows it, your seat opens), **M** votes
   to return to the map, as in a local co-op game.
-- After the ending both of you are back at the lobby, and the game is removed.
+- After the ending the high score table is entered and shown (see [High scores](#high-scores)),
+  then both of you are back at the lobby and the game is removed.
+
+### Saving and loading
+
+Saved games are kept on the server, shared by everybody who plays on it.
+
+- **F5 on the world map** asks for a name (up to 20 letters; Enter alone uses *GAME n - k LEVELS*,
+  Esc cancels) and stores the shared game under it: score, items, completed levels and where the
+  Keens are. Either player can save. While one of you types the name the other is paused and sees
+  *PLAYER n IS SAVING*; the saver is told *Saved* or *Save failed*. F5 in a level does nothing.
+- **Load game** in the lobby lists every save, newest first, with its date, completed levels and
+  score. **Load** starts a *new* game from it, which counts toward the 5-game limit and waits for a
+  partner (or **Play single player**) like any new game. The save itself is never changed or removed:
+  it can be loaded as often as you like, and nobody's progress in a loaded game touches it.
+- Saves are never deleted by the server. They are small files, one per save, in the server's data
+  directory (`saves/<id>.json`, see [Where things are](#where-things-are)); delete one by hand (and
+  restart the server) to remove it. There are no accounts: anybody who can open the page sees every save.
+
+### High scores
+
+The server keeps one high score table, the original's seven rows, for everybody on it. When the
+ending is over and the score is above the lowest row, player 1 (or whoever is left, in a
+one-player game) types a team name in the original's entry screen while the other player sees
+*PLAYER 1 IS ENTERING YOUR TEAM NAME* (12 letters at most). Then both players see the table, and
+return to the lobby. If the score is too low nobody is asked for a name and the table is shown
+straight away. The lobby has a **High scores** button with the same table. The browser's own
+`SCORES.CK1` is not used online. The server cannot check that a score was earned: it only refuses
+entries from a game that did not reach the ending, or with a score above what that game reported.
 
 The details (messages, lockstep, checkpoints and how a joining or drifted browser catches
 up) are in [server/README.md](server/README.md).
+
+## Running a server
+
+### From a release
+
+A [release](https://github.com/carlhako/keen1-online/releases) is a single package,
+`keen1-online-<version>.tar.gz`, with the built server, the web build (the shareware episode is
+inside it) and this README. It needs Node 22 (see [`.nvmrc`](.nvmrc)) and no build step:
+
+```
+tar xzf keen1-online-0.1.0.tar.gz && cd keen1-online-0.1.0/server
+npm ci --omit=dev
+npm start
+```
+
+The lobby is at <http://localhost:8080/>. Saves and high scores are written to `data/` in the
+directory you start it from; the [server README](server/README.md#configuration) lists the settings.
+
+### On a Debian server or Proxmox LXC
+
+[`deploy/install.sh`](deploy/install.sh) sets the game up as a service that starts on boot: it
+creates a `keen1-online` user, installs Node.js and the latest release under `/opt/keen1-online`,
+writes a config, and enables the `keen1-online` systemd service. You need Debian 12 or newer with
+systemd (or a Proxmox LXC built from a Debian template) on amd64 or arm64, a root shell, and
+outbound access to `github.com`, `nodejs.org` and `registry.npmjs.org`.
+
+Install (as root; a fresh LXC lacks curl, so install it first):
+
+```
+apt-get update && apt-get install -y curl
+```
+
+```
+curl -fsSL https://raw.githubusercontent.com/carlhako/keen1-online/main/deploy/install.sh | bash
+```
+
+It prints the address to play at, `http://<server-ip>:8080/` by default.
+
+Upgrade by running the same command again. With nothing newer it does nothing and leaves the server
+running. Otherwise it installs the new release beside the running one, restarts the service on it and
+checks that `/healthz`, the page at `/` and the WebSocket at `/ws` answer. If they do not, the
+previous release is put back and started again and the script stops with an error (see the log:
+`journalctl -u keen1-online`). Config, saves and high scores are never touched; players are
+disconnected while the service restarts. To go back to an older release, or to pick one:
+
+```
+curl -fsSL https://raw.githubusercontent.com/carlhako/keen1-online/main/deploy/install.sh | RELEASE_TAG=v0.1.0 bash
+```
+
+Options, set in front of `bash` as above:
+
+| Variable      | Effect                                                                          |
+|---------------|---------------------------------------------------------------------------------|
+| `RELEASE_TAG` | Install this release (`v0.1.0`) instead of the latest; can also go back         |
+| `KO_TARBALL`  | Install from a release package already on the server instead of downloading one |
+| `KO_FORCE`    | Set to `1` to reinstall and restart even when already up to date                |
+| `KO_REPO`     | Take releases from another GitHub repository (`owner/name`)                     |
+
+#### Settings
+
+`/etc/keen1-online/config.json` is written from [`server/config.example.json`](server/config.example.json)
+on the first install and left alone after that. Its keys are `port`, `maxGames`, `inputLeadMax`,
+`disconnectSec`, `emptyGameSec`, `checkpointFrames` and `dataDir` (the installer sets it to
+`/var/lib/keen1-online`); the [server README](server/README.md#configuration) explains each. Edit it and
+`systemctl restart keen1-online`. To change only the port, put `PORT=9000` in
+`/etc/keen1-online/env` and restart. A port below 1024 works although the server does not run as root.
+
+#### Where things are
+
+| Path                                         | What                                                    |
+|----------------------------------------------|---------------------------------------------------------|
+| `/opt/keen1-online/current`                  | The running release (links to `releases/<version>`)     |
+| `/opt/keen1-online/node/current`             | Node.js (links to `node/v<version>`)                    |
+| `/etc/keen1-online/config.json`              | Config                                                  |
+| `/etc/keen1-online/env`                      | Optional environment, such as `PORT=9000`               |
+| `/var/lib/keen1-online/saves/<id>.json`      | One file per saved game, never deleted by the server    |
+| `/var/lib/keen1-online/highscores.json`      | The high score table                                    |
+| `/etc/systemd/system/keen1-online.service`   | The service unit (rewritten on every run: use `systemctl edit keen1-online` for changes) |
+
+Day to day: `systemctl status keen1-online`, `journalctl -u keen1-online -f`, and `systemctl
+stop|start|restart keen1-online`. To uninstall:
+
+```
+systemctl disable --now keen1-online
+rm -rf /opt/keen1-online /etc/keen1-online /etc/systemd/system/keen1-online.service
+systemctl daemon-reload && userdel keen1-online
+```
+
+That keeps the saves and the high scores in `/var/lib/keen1-online`; delete that too to remove them.
+
+### Behind a TLS reverse proxy
+
+The page connects to `wss://<same host>/ws` when it is opened over `https`, so a proxy only has to
+forward everything to the server's port, WebSocket upgrades on `/ws` included, and not close idle
+connections early (the server pings every 10 seconds, which counts as traffic).
+
+nginx:
+
+```nginx
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+server {
+    listen 443 ssl;
+    server_name keen.example.com;
+    # ssl_certificate and ssl_certificate_key as usual
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 1h;       # the default 60 s would cut a quiet game
+    }
+}
+```
+
+Caddy (it forwards WebSocket upgrades by itself and gets the certificate):
+
+```
+keen.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+### Releasing
+
+A release is built on a machine with Emscripten (see [Building the web port](#building-the-web-port));
+CI has no emsdk. Bump `version` in `server/package.json` (and `server/package-lock.json`), commit,
+then:
+
+```
+source ~/tools/emsdk/emsdk_env.sh
+make release
+```
+
+`make release` refuses to run with uncommitted changes, so every release matches a commit (written
+into the package as `COMMIT`). It builds the web build and the server and packs `keen1-online-<version>.tar.gz`.
+Publish it with [GitHub's CLI](https://cli.github.com/):
+
+```
+gh release create v0.1.0 keen1-online-0.1.0.tar.gz --title "keen1-online 0.1.0" --generate-notes
+```
+
+The installer reads the latest release from GitHub, so a release is all an upgrade needs.
+The package carries the unmodified shareware episode v1.31 of Commander Keen 1 (id Software, published by
+Apogee), which was released for free distribution; never put the registered episodes in a release.
+`.github/workflows/ci.yml` checks every push: the server's typecheck, lint and tests, and the native
+build. It also runs the replay determinism tests when the repository variable `KEEN_SHAREWARE_URL` points
+at a download of `1keen.zip` (the shareware data is not in the repository).
 
 ## Deterministic simulation and replays
 
@@ -395,7 +573,7 @@ everywhere.
 | Alt | pogo stick (once found) |
 | Ctrl + Alt | fire the raygun |
 | Space | status screen |
-| F1 help, F2 sound, F3 redefine keys, F5 save (on the world map) | |
+| F1 help, F2 sound, F3 redefine keys, F5 save (on the world map; online: to the server) | |
 | Esc | quit (co-op: menu with the return-to-map vote) |
 | R held for half a second | co-op: vote to restart the level |
 | Alt + Enter | toggle fullscreen |
@@ -406,7 +584,8 @@ The original cheats work too: C+T+Space gives items, G+O+D toggles god mode (not
 
 - `web/` the browser page (`shell.html`: the lobby and game screen), IndexedDB glue (`pre.js`)
   and the WebSocket bridge to the game (`net.js`) for `make web`.
-- `server/` the online server: lobby, input relay and checkpoints (Node 22, TypeScript); see its README.
+- `server/` the online server: lobby, input relay, checkpoints, saves and high scores (Node 22, TypeScript); see its README.
+- `deploy/` the installer for a Debian server or LXC (`install.sh`); `.github/workflows/` CI; `make release` builds the package.
 - `tests/` replays and scripts for the determinism tests (`run.sh`), `tests/online/` the end-to-end tests.
 - `src/` the port: `engine.c` (objects, collision, Keen), `actors.c` (enemies, doors,
   bridges), `menus.c` (title, map, ending, scores), `ui.c` (windows, text, status),

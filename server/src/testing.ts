@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { defaultConfig, type ServerConfig } from './config.ts';
 import { Hub, type Conn, type HubOptions } from './hub.ts';
+import { RECORD_BYTES } from './saves.ts';
 import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage } from './protocol.ts';
 
 /** A connection that records what the hub sends it. */
@@ -80,4 +81,17 @@ export function inputs(hub: Hub, conns: TestConn[], from: number, to: number, b 
     if (f > from && f % 50 === 0) vi.advanceTimersByTime(1000);
     for (const c of conns) send(hub, c, { t: 'input', f, b });
   }
+}
+
+/** A valid record: `done` lists the completed levels (1 to 16). */
+export function record(opts: { score?: number; done?: number[]; mapx?: number } = {}): Buffer {
+  const b = Buffer.alloc(RECORD_BYTES);
+  b.writeInt16LE(4, 50); // lives
+  b.writeInt32LE(opts.score ?? 0, 54);
+  b.writeInt32LE(opts.mapx ?? 12 << 12, 58);
+  b.writeInt32LE(30 << 12, 62);
+  b.writeInt32LE((opts.mapx ?? 12 << 12) - 0x9000, 66);
+  b.writeInt32LE(0, 70);
+  for (const level of opts.done ?? []) b.writeInt16LE(1, 18 + (level - 1) * 2);
+  return b;
 }

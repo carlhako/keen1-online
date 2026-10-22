@@ -5,23 +5,23 @@ run with `npm test` in `server/`.
 
 ## 1. Server saves
 
-- [ ] 1.1 Add the save store (one JSON file per save under the configured data directory, list loaded at start-up, newest first) with record validation (92 bytes, done flags and items 0/1, keys 0/1, sane ranges); verify tests for store, list order, restart reload, and refused malformed records
-- [ ] 1.2 Add `save` and `saves` protocol messages and the save list in the lobby (name, date, levels done, score); verify a test round trip and the lobby showing a stored save
-- [ ] 1.3 In the online build, make F5 on the map emit `PAUSE_ON`(saving), run the name prompt locally (20 characters, default name), send the save, show "Saved" or "Save failed", and emit `PAUSE_OFF`; verify in two tabs that the partner sees "PLAYER n IS SAVING" and that F5 in a level does nothing
-- [ ] 1.4 Add `load{saveId}` creating a game from a save (counted toward `maxGames`), with the record in the `start` event and the world map starting from it; verify loading a save made in another session restores score, items, completed levels and map position, and that loading at the limit is refused
-- [ ] 1.5 Document saving, loading and where saves live on disk in `README.md`; verify against a two-tab session
+- [x] 1.1 Add the save store (one JSON file per save under the configured data directory, list loaded at start-up, newest first) with record validation (92 bytes, done flags and items 0/1, keys 0/1, sane ranges); verify tests for store, list order, restart reload, and refused malformed records
+- [x] 1.2 Add `save` and `saves` protocol messages and the save list in the lobby (name, date, levels done, score); verify a test round trip and the lobby showing a stored save
+- [x] 1.3 In the online build, make F5 on the map emit `PAUSE_ON`(saving), run the name prompt locally (20 characters, default name), send the save, show "Saved" or "Save failed", and emit `PAUSE_OFF`; verify in two tabs that the partner sees "PLAYER n IS SAVING" and that F5 in a level does nothing
+- [x] 1.4 Add `load{saveId}` creating a game from a save (counted toward `maxGames`), with the record in the `start` event and the world map starting from it; verify loading a save made in another session restores score, items, completed levels and map position, and that loading at the limit is refused
+- [x] 1.5 Document saving, loading and where saves live on disk in `README.md`; verify against a two-tab session
 
 ## 2. Server high scores
 
-- [ ] 2.1 Add the high score store (7 entries, original defaults, atomic writes) and include the shared score in checksum reports; verify tests for defaults, insertion order, atomic write and restart reload
-- [ ] 2.2 Accept submissions only after `finished`, with score not above the last reported score and a printable name up to 12 characters; verify tests for each refusal
-- [ ] 2.3 After the ending, run the original name entry for player 1 (or the only player) when the score qualifies, show "PLAYER 1 IS ENTERING YOUR TEAM NAME" to the others, then show the table to everyone before the lobby; verify with a replay or save starting just before the last ship part in two tabs
-- [ ] 2.4 Show the table in the lobby; verify it updates after a new entry
-- [ ] 2.5 Document the shared table in `README.md`; verify it matches the behaviour
+- [x] 2.1 Add the high score store (7 entries, original defaults, atomic writes) and include the shared score in checksum reports; verify tests for defaults, insertion order, atomic write and restart reload
+- [x] 2.2 Accept submissions only after `finished`, with score not above the last reported score and a printable name up to 12 characters; verify tests for each refusal
+- [x] 2.3 After the ending, run the original name entry for player 1 (or the only player) when the score qualifies, show "PLAYER 1 IS ENTERING YOUR TEAM NAME" to the others, then show the table to everyone before the lobby; verify with a replay or save starting just before the last ship part in two tabs
+- [x] 2.4 Show the table in the lobby; verify it updates after a new entry
+- [x] 2.5 Document the shared table in `README.md`; verify it matches the behaviour
 
 ## 3. Release and CI
 
-- [ ] 3.1 Add `.nvmrc` (22) and `make release` producing `keen1-online-<version>.tar.gz` (refusing with uncommitted changes); verify extracting it, `npm ci --omit=dev` in `server/` and `npm start` serve a playable lobby
+- [x] 3.1 Add `.nvmrc` (22) and `make release` producing `keen1-online-<version>.tar.gz` (refusing with uncommitted changes); verify extracting it, `npm ci --omit=dev` in `server/` and `npm start` serve a playable lobby
 - [ ] 3.2 Add `.github/workflows/ci.yml` running server lint, typecheck and tests, the native build and the replay determinism test; verify the workflow passes on a push
 - [ ] 3.3 Document releasing (`make release`, `gh release create`) in `README.md`; verify by publishing the first release
 

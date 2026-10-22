@@ -14,7 +14,11 @@ export interface ServerConfig {
   emptyGameSec: number;
   /** Frames between checkpoints (a multiple of the 24-frame checksum interval). */
   checkpointFrames: number;
+  /** Where saves and the high score table are kept. A relative path is taken from the working directory. */
+  dataDir: string;
 }
+
+type NumericKey = Exclude<keyof ServerConfig, 'dataDir'>;
 
 /** How often browsers report a checksum, in frames. */
 export const CHECKSUM_FRAMES = 24;
@@ -28,7 +32,7 @@ interface Field {
   ruleText?: string;
 }
 
-const FIELDS: { [K in keyof ServerConfig]: Field } = {
+const FIELDS: { [K in NumericKey]: Field } = {
   port: { def: 8080, min: 0, max: 65535 },
   maxGames: { def: 5, min: 1, max: 100 },
   inputLeadMax: { def: 6, min: 2, max: 60 },
@@ -43,11 +47,14 @@ const FIELDS: { [K in keyof ServerConfig]: Field } = {
   },
 };
 
-const KEYS = Object.keys(FIELDS) as (keyof ServerConfig)[];
+const NUMERIC_KEYS = Object.keys(FIELDS) as NumericKey[];
+const KEYS: string[] = [...NUMERIC_KEYS, 'dataDir'];
+
+export const DEFAULT_DATA_DIR = 'data';
 
 export function defaultConfig(): ServerConfig {
-  const cfg = {} as ServerConfig;
-  for (const key of KEYS) cfg[key] = FIELDS[key].def;
+  const cfg = { dataDir: DEFAULT_DATA_DIR } as ServerConfig;
+  for (const key of NUMERIC_KEYS) cfg[key] = FIELDS[key].def;
   return cfg;
 }
 
@@ -65,11 +72,16 @@ export function parseConfig(raw: unknown): ParseResult {
     return { ok: false, errors: ['config: must be a JSON object'], warnings: [] };
   }
   const warnings = Object.keys(raw)
-    .filter((k) => !(KEYS as string[]).includes(k))
+    .filter((k) => !KEYS.includes(k))
     .map((k) => `unknown config key "${k}" (ignored)`);
   const errors: string[] = [];
   const config = defaultConfig();
-  for (const key of KEYS) {
+  if ('dataDir' in raw) {
+    const v = raw.dataDir;
+    if (typeof v !== 'string' || v.trim() === '') errors.push('dataDir: must be a directory path');
+    else config.dataDir = v;
+  }
+  for (const key of NUMERIC_KEYS) {
     if (!(key in raw)) continue;
     const f = FIELDS[key];
     const v = raw[key];

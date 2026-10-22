@@ -255,6 +255,40 @@ int load_game_prompt(void)
     }
 }
 
+/* A game that starts from a record (a save held by the server) rather than a new one. */
+void game_load_record(const void *rec)
+{
+    memcpy(&gs, rec, sizeof gs);
+    game_loaded = 1;
+}
+
+/* Online, F5 on the world map saves the shared game on the server. The other players are paused
+ * (the caller sent EV_SAVE_ON); this machine asks for a name, sends the record and says how it went. */
+#define SAVE_NAME_MAX 20
+
+void online_save_prompt(void)
+{
+    char def[SAVE_NAME_MAX + 1], name[SAVE_NAME_MAX + 1];
+    int levels = 0;
+    for (int i = 0; i < 16; i++)
+        levels += gs.done[i] != 0;
+    snprintf(def, sizeof def, "GAME %d - %d LEVELS", net_game_id(), levels);
+    win_grow(0x20, 5);
+    print("SAVE GAME AS:\n");
+    print_hi(def);
+    print("\nENTER USES THIS NAME\nESC STOPS\n");
+    if (!input_line(name, SAVE_NAME_MAX))
+        return;
+    name[SAVE_NAME_MAX] = 0;
+    if (!name[0])
+        snprintf(name, sizeof name, "%s", def);
+    int stored = net_save_record(name);
+    win_grow(0x10, 1);
+    print(stored ? "Saved" : "Save failed");
+    flush_input();
+    wait_key();
+}
+
 /* ------------------------------------------------------------------ */
 /* Title screen pages (render hooks) */
 
@@ -1234,7 +1268,7 @@ static int coop_map_loop(void)
             if (screen) {
                 /* Help and key setup stop the game for everybody: the pause
                  * events go through the input stream around the local screen. */
-                ui_emit(local_player, EV_PAUSE_ON);
+                ui_emit(local_player, screen == 0x3f ? EV_SAVE_ON : EV_PAUSE_ON);
                 map_frame();
                 if (map_restart) {
                     chosen = -1;
@@ -1514,14 +1548,38 @@ void ending(void)
 /* ------------------------------------------------------------------ */
 /* 0x8CE4: game over / high score entry */
 
+/* Online, the high scores are the server's: copy its table over the local one. */
+static void scores_from_server(void)
+{
+    net_score_t rows[7];
+    if (!net_scores(rows))
+        return;
+    memset(&hs, 0, sizeof hs);
+    for (int i = 0; i < 7; i++) {
+        hs.score[i] = rows[i].score;
+        hs.joystick[i] = rows[i].parts & 1;
+        hs.battery[i] = (rows[i].parts >> 1) & 1;
+        hs.vacuum[i] = (rows[i].parts >> 2) & 1;
+        hs.whiskey[i] = (rows[i].parts >> 3) & 1;
+        snprintf(hs.name[i], 13, "%s", rows[i].name);
+    }
+}
+
 static void game_over(void)
 {
+    int entry = -1;             /* online: the seat that types the team name */
+    if (net_online) {
+        entry = net_wait_ended();
+        scores_from_server();
+    }
     int rank = 0;
     for (int i = 0; i < 7; i++)
         if (gs.score > hs.score[i]) {
             rank = i + 1;
             break;
         }
+    if (entry >= 0 && !rank)
+        rank = 1;               /* the server asked for a name, so the score qualifies */
     scroll_x &= ~0xfff;
     scroll_y &= ~0xfff;
     frame_start();
@@ -1555,7 +1613,10 @@ static void game_over(void)
         print(ds_str(0x2e39));
         print(ds_str(0x2e52));
         print(ds_str(0x2a87 + r * 7));
-        print(ds_str(0x2e60));
+        if (net_online && entry != net_seat)
+            print(" place!\n\n\n  Please wait...");
+        else
+            print(ds_str(0x2e60));
         for (int i = 5; i >= r; i--) {
             hs.score[i + 1] = hs.score[i];
             hs.joystick[i + 1] = hs.joystick[i];
@@ -1567,7 +1628,19 @@ static void game_over(void)
             memcpy(hs.name[i + 1], hs.name[i], 13);
         }
         flush_input();
+        if (net_online && entry != net_seat) {
+            /* the others see who is typing, and wait for the table */
+            char text[48];
+            snprintf(text, sizeof text, "PLAYER %d IS ENTERING YOUR TEAM NAME", entry + 1);
+            strip(0, text);
+            plat_present();
+            net_wait_ended();
+            scores_from_server();
+            goto entered;
+        }
         input_line(hs.name[r], 12);
+        if (net_online && !hs.name[r][0])
+            snprintf(hs.name[r], 13, "TEAM");      /* the server wants a name */
         hs.score[r] = gs.score;
         hs.joystick[r] = gs.joystick;
         hs.battery[r] = gs.battery;
@@ -1575,8 +1648,17 @@ static void game_over(void)
         hs.whiskey[r] = gs.whiskey;
         hs.unused1[r] = 0;
         hs.unused2[r] = gs.unused2;
-        save_file("SCORES.CK1", &hs, 0xcc);
+        if (net_online) {
+            int parts = (gs.joystick ? 1 : 0) | (gs.battery ? 2 : 0) | (gs.vacuum ? 4 : 0) |
+                        (gs.whiskey ? 8 : 0);
+            net_submit_score(hs.name[r], gs.score, parts);
+            net_wait_ended();       /* the table is final */
+            scores_from_server();
+        } else {
+            save_file("SCORES.CK1", &hs, 0xcc);
+        }
     }
+entered:;
     ctrl_t c;
     do {
         read_ctrl(&c);
@@ -1608,6 +1690,10 @@ static void game_over(void)
             break;
     }
     fade_out();
+    if (net_online) {
+        net_event(3);           /* back to the lobby; the page reloads */
+        net_idle_forever();
+    }
 }
 
 /* 0x7DFB: the world map and the game. */
@@ -1653,6 +1739,7 @@ void game_setup(void)
 
 void play_game(void)
 {
+    int ending_done = 0;        /* online: the ending was played and the server told */
     int result = LR_DIED;
     int recenter = 0;           /* co-op: put every Keen at the entrance and centre the cameras */
     int resume_level = 0;       /* online: the level a snapshot to restore was taken in */
@@ -1848,6 +1935,7 @@ void play_game(void)
                         if (!plat_headless())
                             ending();   /* for every player in the game (it waits for keys) */
                         net_event(2);
+                        ending_done = 1;
                     }
                     goto out;
                 }
@@ -1857,7 +1945,7 @@ void play_game(void)
     snd_wait();
     fade_in();
 out:
-    if (net_online)
+    if (net_online && !ending_done)
         net_idle_forever();     /* the page goes back to the lobby when the server says so */
     if (!replaying)
         game_over();

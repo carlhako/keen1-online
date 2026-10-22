@@ -77,6 +77,7 @@ enum {
     EV_MAP_TOGGLE = 2,          /* vote to return to the world map, or withdraw it */
     EV_PAUSE_ON = 4,            /* this player opened help or key setup on the map */
     EV_PAUSE_OFF = 8,           /* ...and closed it again */
+    EV_SAVE_ON = 16,            /* this player opened the save prompt on the map (online) */
 };
 
 /* One player. Keens occupy object slots 0..nplayers-1 (slot i is player i),
@@ -122,7 +123,7 @@ typedef struct {
     int32_t levels_started;         /* levels begun in this game; seeds each level's random generator */
     int32_t restart_votes;          /* bit per player */
     int32_t map_votes;              /* bit per player: return to the world map */
-    int32_t pause_mask;             /* bit per player holding help or key setup open */
+    int32_t pause_mask;             /* bit per player holding help or key setup open; bit 4+p: ...saving */
     int32_t req_by;                 /* world-map start request: requesting player, -1 none */
     int32_t req_level;
     int32_t req_mask;               /* players who confirmed it */
@@ -266,6 +267,13 @@ int net_frame_begin(void);              /* top of a simulated frame; 1 = restart
 void net_event(int code);               /* 1 the ending starts, 2 the game finished, 3 leave */
 void net_local_screen(int on);          /* a blocking local screen is up: keep the input stream going */
 void net_idle_forever(void);
+int net_start_record(void *out);        /* a game loaded from a save: its 92 byte record; 0 for a new game */
+int net_game_id(void);
+int net_save_record(const char *name);  /* store the shared record on the server: 1 stored, 0 failed */
+int net_wait_ended(void);               /* after the ending: the seat to type the team name, or -1 */
+void net_submit_score(const char *name, int32_t score, int parts);
+typedef struct { int32_t score, parts; char name[16]; } net_score_t;
+int net_scores(net_score_t *rows);      /* the server's high score table (7 rows); 0 when not known */
 void sim_warp(int p, int tx, int ty);        /* test aid: put a Keen on a tile */
 int sim_snapshot_kind(const uint8_t *buf, size_t len, int *in_map, int *level);
 
@@ -317,6 +325,9 @@ void game_setup(void);              /* start of a game: map position, scores */
 void game_new(void);                /* a new game's record: lives, ammo, no ship parts */
 void play_game(void);
 void save_game_prompt(void);
+void online_save_prompt(void);          /* F5 on the world map of an online game: save on the server */
+void strip(int row, const char *text);  /* one line on a bar across the top of the screen */
+void game_load_record(const void *rec); /* the game starts from this 92 byte record, as if loaded */
 int load_game_prompt(void);
 void ending(void);
 void high_scores_check(void);

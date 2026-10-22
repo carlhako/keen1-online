@@ -5,6 +5,8 @@
  * only, in order, so every browser runs the same game.
  */
 
+import type { SaveInfo } from './saves.ts';
+
 /** Bumped when messages change in a way an older page cannot follow. */
 export const PROTOCOL_VERSION = 1;
 
@@ -24,20 +26,35 @@ export const INPUT_RATE = 60;
 export const MALFORMED_LIMIT = 5;
 
 /** A frame's input packs direction (0..8), the two buttons and the one-frame events. */
-export const MAX_INPUT = 1 << 10;
+export const MAX_INPUT = 1 << 11;
 
-export type Phase = 'waiting' | 'playing' | 'paused' | 'empty' | 'removed';
+/** The largest score a game record or a table entry may hold. */
+export const MAX_SCORE = 99_999_999;
+
+/**
+ * - `scoring`: the ending is over; a team name may be typed and the table is shown, then everyone
+ *   leaves.
+ */
+export type Phase = 'waiting' | 'playing' | 'paused' | 'empty' | 'scoring' | 'removed';
 
 /** Where a game is: waiting to start, on the world map, or in a level. */
 export type Location = { kind: 'waiting' } | { kind: 'map' } | { kind: 'level'; level: number };
 
-export type RejectReason = 'version' | 'full' | 'nogame' | 'closed' | 'busy';
+export type RejectReason = 'version' | 'full' | 'nogame' | 'closed' | 'busy' | 'nosave' | 'invalid';
 
 /** Something that happens on a frame, in the order listed. */
 export type GameEvent =
   | { t: 'start'; seed: number; mask: number }
   | { t: 'add'; seat: number }
   | { t: 'remove'; seat: number };
+
+/** A row of the high score table, in the original's layout. */
+export interface ScoreRow {
+  score: number;
+  name: string;
+  /** Ship parts held: bit 0 joystick, 1 battery, 2 vacuum, 3 whiskey. */
+  parts: number;
+}
 
 export interface LobbyGame {
   id: number;
@@ -54,12 +71,21 @@ export interface LobbyGame {
 export type ClientMessage =
   | { t: 'hello'; v: number; build: string }
   | { t: 'create' }
+  /** Start a new game from a save held by the server. */
+  | { t: 'load'; save: number }
+  /** Store the shared game record (base64, 92 bytes) under a name; answered by `saved`. */
+  | { t: 'save'; name: string; rec: string }
+  /** The team name for the high score table, from the seat asked for it by `ended`. */
+  | { t: 'score'; name: string; score: number; parts: number }
   | { t: 'join'; game: number; token?: string }
   | { t: 'single' }
   | { t: 'leave' }
   | { t: 'input'; f: number; b: number }
-  /** Checksum of the state before frame `f` is simulated; `l` is where the game is (0 map, n level). */
-  | { t: 'sum'; f: number; c: number; l: number }
+  /**
+   * Checksum of the state before frame `f` is simulated; `l` is where the game is (0 map, n level)
+   * and `s` the shared score, which bounds what the game may later enter in the high score table.
+   */
+  | { t: 'sum'; f: number; c: number; l: number; s?: number }
   /** A joining browser has caught up and is about to simulate frame `f`. */
   | { t: 'ready'; f: number }
   | { t: 'continue' }
@@ -79,14 +105,14 @@ export type ServerMessage =
   | { t: 'reject'; reason: RejectReason; count?: number; max?: number }
   | { t: 'lobby'; games: LobbyGame[]; count: number; max: number }
   | { t: 'joined'; game: number; seat: number; token: string; phase: Phase }
-  | { t: 'start'; seed: number; mask: number }
+  | { t: 'start'; seed: number; mask: number; rec?: string }
   /** A sealed frame: every seat's input, and the events that apply on it. */
   | { t: 'frame'; n: number; in: number[]; ev?: GameEvent[] }
   /**
    * Catch up from frame `f`: a binary snapshot follows unless `fresh`, then the sealed frames
    * from `f` on. `seed` and `mask` start a fresh game.
    */
-  | { t: 'restore'; f: number; fresh: boolean; seed: number; mask: number }
+  | { t: 'restore'; f: number; fresh: boolean; seed: number; mask: number; rec?: string }
   /** The joining browser may start sending inputs from frame `from`. */
   | { t: 'golive'; from: number }
   /** The server wants a snapshot of the state now, for a browser that drifted. */
@@ -95,7 +121,17 @@ export type ServerMessage =
   | { t: 'duty'; on: boolean }
   | { t: 'paused'; seats: number[] }
   | { t: 'resumed' }
-  | { t: 'ended' }
+  /**
+   * The ending is over. `entry` is the seat typing the team name for the high score table, or -1
+   * when no name is wanted (the score is too low, or the table is final): show the table.
+   */
+  | { t: 'ended'; entry: number }
+  /** The saves on the server, newest first. */
+  | { t: 'saves'; saves: SaveInfo[] }
+  /** Whether the server stored the sender's save. */
+  | { t: 'saved'; ok: boolean; id?: number }
+  /** The high score table. */
+  | { t: 'scores'; rows: ScoreRow[] }
   | { t: 'left' }
   | { t: 'pong'; c: number };
 
@@ -159,8 +195,26 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
         ? { t: 'input', f: m.f, b: m.b }
         : null;
     case 'sum':
-      return isInt(m.f, 0, 2 ** 32 - 1) && isInt(m.c, 0, 2 ** 32 - 1) && isInt(m.l, 0, 16)
-        ? { t: 'sum', f: m.f, c: m.c, l: m.l }
+      if (!isInt(m.f, 0, 2 ** 32 - 1) || !isInt(m.c, 0, 2 ** 32 - 1) || !isInt(m.l, 0, 16)) {
+        return null;
+      }
+      if (m.s === undefined) return { t: 'sum', f: m.f, c: m.c, l: m.l };
+      return isInt(m.s, 0, MAX_SCORE) ? { t: 'sum', f: m.f, c: m.c, l: m.l, s: m.s } : null;
+    case 'save':
+      return typeof m.name === 'string' &&
+        m.name.length <= 64 &&
+        typeof m.rec === 'string' &&
+        m.rec.length <= 256
+        ? { t: 'save', name: m.name, rec: m.rec }
+        : null;
+    case 'load':
+      return isInt(m.save, 1, 2 ** 31) ? { t: 'load', save: m.save } : null;
+    case 'score':
+      return typeof m.name === 'string' &&
+        m.name.length <= 64 &&
+        isInt(m.score, 0, MAX_SCORE) &&
+        isInt(m.parts, 0, 15)
+        ? { t: 'score', name: m.name, score: m.score, parts: m.parts }
         : null;
     case 'ready':
       return isInt(m.f, 0, 2 ** 32 - 1) ? { t: 'ready', f: m.f } : null;

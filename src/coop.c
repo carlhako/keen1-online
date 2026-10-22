@@ -74,8 +74,10 @@ void coop_events(int in_level)
         } else {
             if (ev & EV_PAUSE_ON)
                 game.pause_mask |= bit;
+            if (ev & EV_SAVE_ON)
+                game.pause_mask |= bit | bit << 4;      /* paused, and the others are told why */
             if (ev & EV_PAUSE_OFF)
-                game.pause_mask &= ~bit;
+                game.pause_mask &= ~(bit | bit << 4);
         }
     }
 }
@@ -224,7 +226,7 @@ void coop_remove_player(int seat)
     players[seat].ctrl = players[seat].ctrl_prev = (ctrl_t){8, 0, 0, 0};
     game.restart_votes &= ~bit;
     game.map_votes &= ~bit;
-    game.pause_mask &= ~bit;
+    game.pause_mask &= ~(bit | bit << 4);
     game.req_mask &= ~bit;
     if (game.req_by == seat) {
         game.req_by = -1;

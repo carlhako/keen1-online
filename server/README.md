@@ -21,7 +21,10 @@ npm test             # unit tests (no browser needed)
 `make web` in the repository root builds the page and game first. The server looks for the web build
 in `../web` (a release) or `../build/web` (a checkout); `KEEN_WEB_DIR` overrides it.
 
-`/healthz` answers `{"status":"ok","games":N,"players":N,"buildId":"..."}`.
+Saves and the high score table are files under `dataDir` (see [Saves and the high score table](#saves-and-the-high-score-table)).
+
+`/healthz` answers `{"status":"ok","games":N,"players":N,"buildId":"...","version":"..."}`; `version` is the
+release's `package.json` version, which the installer checks after an upgrade.
 
 ### Configuration
 
@@ -29,14 +32,15 @@ in `../web` (a release) or `../build/web` (a checkout); `KEEN_WEB_DIR` overrides
 these keys; every key is optional. `config.example.json` lists the defaults. `PORT` in the
 environment overrides `port`. An unknown key is reported and ignored, a bad value stops the server.
 
-| Key                | Default | Meaning                                                                           |
-| ------------------ | ------- | --------------------------------------------------------------------------------- |
-| `port`             | 8080    | TCP port for the page and `/ws`.                                                  |
-| `maxGames`         | 5       | Games that may exist at once, in any phase, until they are removed.               |
-| `inputLeadMax`     | 6       | The most frames ahead a browser may schedule its input (it is told in `welcome`). |
-| `disconnectSec`    | 15      | Seconds the game waits for a player's input before dropping that player.          |
-| `emptyGameSec`     | 60      | Seconds a game with nobody in it is kept, joinable, before it is removed.         |
-| `checkpointFrames` | 240     | Frames between checkpoints (a multiple of 24, the checksum interval).             |
+| Key                | Default | Meaning                                                                                        |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------- |
+| `port`             | 8080    | TCP port for the page and `/ws`.                                                               |
+| `maxGames`         | 5       | Games that may exist at once, in any phase, until they are removed.                            |
+| `inputLeadMax`     | 6       | The most frames ahead a browser may schedule its input (it is told in `welcome`).              |
+| `disconnectSec`    | 15      | Seconds the game waits for a player's input before dropping that player.                       |
+| `emptyGameSec`     | 60      | Seconds a game with nobody in it is kept, joinable, before it is removed.                      |
+| `checkpointFrames` | 240     | Frames between checkpoints (a multiple of 24, the checksum interval).                          |
+| `dataDir`          | "data"  | Directory for saves and the high score table. A relative path starts at the working directory. |
 
 ### Debugging: the frame log
 
@@ -63,7 +67,7 @@ state, on any machine. So the browsers only need to exchange inputs.
   the game starting (`start`), a player's Keen being added (`add`) or removed (`remove`). Every browser
   applies them on the same frame, with no negotiation.
 - An input is a number: the direction (0 to 8, 8 = none) in bits 0 to 3, the two buttons in bits 4 and
-  5, and the one-frame events (votes, pauses) in bits 6 to 9. A seat without a player has input 8.
+  5, and the one-frame events (votes, pauses) in bits 6 to 10. A seat without a player has input 8.
 - Every 24 frames each browser reports a checksum of its state. If the reports for a frame disagree,
   the browser that has been in the game longest is asked for its state (`snap`), which replaces the
   state of the browsers that differ.
@@ -89,20 +93,23 @@ closes the connection.
 
 ### Browser to server
 
-| Type       | Fields           | Meaning                                                                                                          |
-| ---------- | ---------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `hello`    | `v`, `build`     | First message. Protocol version and build id.                                                                    |
-| `create`   |                  | Start a new game; the sender is player 1 and waits for player 2.                                                 |
-| `join`     | `game`, `token?` | Take an open seat in a game. With the `token` of a seat the sender had before, that seat is taken if it is open. |
-| `single`   |                  | The waiting player chooses Play single player: the game starts with one Keen.                                    |
-| `leave`    |                  | Leave the game (the Esc menu): the seat opens, as for a disconnect.                                              |
-| `input`    | `f`, `b`         | The sender's input `b` for frame `f`.                                                                            |
-| `sum`      | `f`, `c`, `l`    | Checksum `c` of the state before frame `f`; `l` is where the game is (0 map, n level n).                         |
-| `ready`    | `f`              | A joining browser has restored its snapshot and caught up; it is about to simulate frame `f`.                    |
-| `continue` |                  | Continue single player, after the other player left.                                                             |
-| `ending`   |                  | The ending cinematic started: no inputs come until `finished`.                                                   |
-| `finished` |                  | The ending is over. When every player has said so the game is over.                                              |
-| `ping`     | `c`              | Answered by `pong` with the same `c`; the browser measures its round trip with it.                               |
+| Type       | Fields                   | Meaning                                                                                                                    |
+| ---------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `hello`    | `v`, `build`             | First message. Protocol version and build id.                                                                              |
+| `create`   |                          | Start a new game; the sender is player 1 and waits for player 2.                                                           |
+| `load`     | `save`                   | Start a new game from the save with that id (the sender is player 1 and waits for player 2).                               |
+| `save`     | `name`, `rec`            | Store the shared game record (`rec`, 92 bytes in base64) under `name` (1 to 20 printable characters). Answered by `saved`. |
+| `score`    | `name`, `score`, `parts` | The team name for the high score table, from the seat `ended` named. `parts` is 0 to 15.                                   |
+| `join`     | `game`, `token?`         | Take an open seat in a game. With the `token` of a seat the sender had before, that seat is taken if it is open.           |
+| `single`   |                          | The waiting player chooses Play single player: the game starts with one Keen.                                              |
+| `leave`    |                          | Leave the game (the Esc menu): the seat opens, as for a disconnect.                                                        |
+| `input`    | `f`, `b`                 | The sender's input `b` for frame `f`.                                                                                      |
+| `sum`      | `f`, `c`, `l`, `s?`      | Checksum `c` of the state before frame `f`; `l` is where the game is (0 map, n level n); `s` is the shared score.          |
+| `ready`    | `f`                      | A joining browser has restored its snapshot and caught up; it is about to simulate frame `f`.                              |
+| `continue` |                          | Continue single player, after the other player left.                                                                       |
+| `ending`   |                          | The ending cinematic started: no inputs come until `finished`.                                                             |
+| `finished` |                          | The ending is over. When every player has said so the game moves on to the high score table (`ended`).                     |
+| `ping`     | `c`                      | Answered by `pong` with the same `c`; the browser measures its round trip with it.                                         |
 
 Binary, browser to server: `[kind u8][frame u32 le][checksum u32 le][snapshot ...]`. Kind 1 is a
 **checkpoint** for `frame` (it counts once every player reported the same checksum for that frame).
@@ -110,23 +117,26 @@ Kind 2 is the **resync** snapshot the server asked for with `snap`.
 
 ### Server to browser
 
-| Type      | Fields                           | Meaning                                                                                                                                                                   |
-| --------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `welcome` | `v`, `cfg`                       | The handshake succeeded. `cfg` has `checkpointFrames`, `inputLeadMax` and `disconnectSec`.                                                                                |
-| `reject`  | `reason`, `count?`, `max?`       | A request failed: `version` (the connection is closed), `full` (`maxGames` reached), `nogame`, `closed` (both seats taken), `busy` (already in a game), `bad`.            |
-| `lobby`   | `games`, `count`, `max`          | The running games, sent to everybody in the lobby whenever they change. Each game has `id`, `seats` (players in it), `open` (seats that can be taken), `phase` and `loc`. |
-| `joined`  | `game`, `seat`, `token`, `phase` | The sender is in a game. The `token` is for rejoining.                                                                                                                    |
-| `start`   | `seed`, `mask`                   | The game starts: the random seed and which seats have a Keen.                                                                                                             |
-| `frame`   | `n`, `in`, `ev?`                 | Sealed frame `n`: the input of seat 0 and 1, and the events on it.                                                                                                        |
-| `restore` | `f`, `fresh`, `seed`, `mask`     | Catch up from frame `f`: a binary snapshot follows (unless `fresh`: start from the seed), then the sealed frames from `f` on.                                             |
-| `golive`  | `from`                           | The joining browser's Keen appears on frame `from`; it must send inputs for `from` and later.                                                                             |
-| `snap`    |                                  | Send me your state now: another browser drifted.                                                                                                                          |
-| `duty`    | `on`                             | Whether this browser uploads checkpoints.                                                                                                                                 |
-| `paused`  | `seats`                          | The listed seats left; the game waits for `continue` or for somebody to join.                                                                                             |
-| `resumed` |                                  | The game runs again.                                                                                                                                                      |
-| `ended`   |                                  | The game is over; go back to the lobby.                                                                                                                                   |
-| `left`    |                                  | The sender is out of its game (it left, or was dropped) and back in the lobby.                                                                                            |
-| `pong`    | `c`                              | Answer to `ping`.                                                                                                                                                         |
+| Type      | Fields                               | Meaning                                                                                                                                                                                                                                                          |
+| --------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `welcome` | `v`, `cfg`                           | The handshake succeeded. `cfg` has `checkpointFrames`, `inputLeadMax` and `disconnectSec`.                                                                                                                                                                       |
+| `reject`  | `reason`, `count?`, `max?`           | A request failed: `version` (the connection is closed), `full` (`maxGames` reached), `nogame`, `closed` (both seats taken, or the game is over), `busy` (already in a game), `nosave` (no save with that id), `invalid` (a high score entry was refused), `bad`. |
+| `lobby`   | `games`, `count`, `max`              | The running games, sent to everybody in the lobby whenever they change. Each game has `id`, `seats` (players in it), `open` (seats that can be taken), `phase` and `loc`.                                                                                        |
+| `joined`  | `game`, `seat`, `token`, `phase`     | The sender is in a game. The `token` is for rejoining.                                                                                                                                                                                                           |
+| `start`   | `seed`, `mask`, `rec?`               | The game starts: the random seed and which seats have a Keen. A game loaded from a save carries its record in `rec` (base64).                                                                                                                                    |
+| `saves`   | `saves`                              | The saves on the server, newest first, each with `id`, `name`, `date`, `levels` (completed) and `score`. Sent to everybody in the lobby whenever they change.                                                                                                    |
+| `saved`   | `ok`, `id?`                          | Whether the sender's `save` was stored.                                                                                                                                                                                                                          |
+| `scores`  | `rows`                               | The high score table: 7 rows of `score`, `name` and `parts`. Sent to everybody when they connect and whenever it changes.                                                                                                                                        |
+| `frame`   | `n`, `in`, `ev?`                     | Sealed frame `n`: the input of seat 0 and 1, and the events on it.                                                                                                                                                                                               |
+| `restore` | `f`, `fresh`, `seed`, `mask`, `rec?` | Catch up from frame `f`: a binary snapshot follows (unless `fresh`: start from the seed and `rec`, the record of a loaded game), then the sealed frames from `f` on.                                                                                             |
+| `golive`  | `from`                               | The joining browser's Keen appears on frame `from`; it must send inputs for `from` and later.                                                                                                                                                                    |
+| `snap`    |                                      | Send me your state now: another browser drifted.                                                                                                                                                                                                                 |
+| `duty`    | `on`                                 | Whether this browser uploads checkpoints.                                                                                                                                                                                                                        |
+| `paused`  | `seats`                              | The listed seats left; the game waits for `continue` or for somebody to join.                                                                                                                                                                                    |
+| `resumed` |                                      | The game runs again.                                                                                                                                                                                                                                             |
+| `ended`   | `entry`                              | The ending is over. `entry` is the seat to type the team name, or -1 when the table is final (or no name is wanted): show it, then `leave`. Sent again with -1 once a name is stored.                                                                            |
+| `left`    |                                      | The sender is out of its game (it left, or was dropped) and back in the lobby.                                                                                                                                                                                   |
+| `pong`    | `c`                                  | Answer to `ping`.                                                                                                                                                                                                                                                |
 
 Binary, server to browser: `[1][frame u32 le][snapshot ...]`, the snapshot of a `restore`.
 
@@ -137,7 +147,8 @@ lowest-numbered Keen that is alive.
 ## Games, seats and what happens when somebody leaves
 
 A game has two seats and a phase: `waiting` (player 1 alone, before it starts), `playing`, `paused`
-(a player left and the other has not chosen Continue yet) or `empty` (kept for `emptyGameSec`).
+(a player left and the other has not chosen Continue yet), `empty` (kept for `emptyGameSec`) or
+`scoring` (the ending is over; see below).
 
 - A seat is dropped when its connection closes, when its player leaves, or when the game has waited for
   its input for `disconnectSec` seconds. A game that is waiting for a slow player is not dropped for
@@ -154,3 +165,37 @@ A game has two seats and a phase: `waiting` (player 1 alone, before it starts), 
   messages is closed.
 - The server pings every connection every 10 seconds, which also keeps the connection open behind a
   reverse proxy.
+
+## Saves and the high score table
+
+Both live under `dataDir` and survive restarts. Nothing is ever deleted by the server.
+
+### Saves
+
+- `save` is accepted from a player in a running game while it is on the world map, never in a level or
+  while waiting. The record is checked against the original's ranges (92 bytes; the ship parts, keys and
+  completed-level flags 0 or 1; lives, ammo, score and positions in range), and the name must be 1 to 20
+  printable characters. Otherwise the answer is `saved` with `ok` false and nothing is stored.
+- Each save is a file `saves/<id>.json` in `dataDir`: `id`, `name`, `date`, `levels`, `score` and the
+  record in base64. Ids count up from 1. The list is read when the server starts and kept in memory, so
+  copying a file in or deleting one by hand needs a restart. A file that cannot be read is skipped with a
+  log line.
+- `load` creates a game like `create` does (the same `maxGames` limit, the same waiting screen) whose
+  `start` message, and the `restore` of a player who joins later, carry the record.
+
+### High scores
+
+- `highscores.json` in `dataDir` holds 7 rows, written to a temporary file and renamed. It starts as the
+  original's table (seven times 100 points, Yorpy, Gargile and Zzapp!). A row is inserted above the first
+  lower score, as in the original, and the last row falls off.
+- Every `sum` may carry the shared score `s`; the game reports it once more just before the ending.
+- When every player in a game has sent `finished`, the game is `scoring`. If the latest reported score is
+  above the lowest row, `ended` names the lowest-numbered player still in the game, who types the team
+  name and answers with `score`. The server accepts it only from that seat, in that phase, with a score
+  no higher than the one reported and a name of 1 to 12 printable characters; otherwise it answers
+  `reject` with `invalid` and the entry stays open. A name that is not typed within two minutes, or whose
+  typist leaves, is given up on.
+- Once the table is final everybody in the game gets `scores` and `ended` with `entry` -1, shows the table
+  and sends `leave`. A game in this phase cannot be joined, and goes when its last player leaves.
+- None of this proves the score is honest: the server cannot play the game. It only keeps a client from
+  entering a score without finishing a game, or one higher than the game said it had.

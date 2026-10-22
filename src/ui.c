@@ -788,6 +788,11 @@ int ui_poll_coop(void)
         key_get();
         return in_world_map ? scan : 0;
     case 0x3f:
+        if (net_online) {
+            /* online, F5 saves on the server from the world map and does nothing in a level */
+            key_get();
+            return in_world_map ? scan : 0;
+        }
         check_hotkeys();
         return 0;
     }
@@ -802,6 +807,8 @@ void ui_run_screen(int scan)
     flush_input();
     if (scan == 0x3b)
         help_screen();
+    else if (scan == 0x3f)
+        online_save_prompt();
     else
         controls_menu();
     rf_hook = ui_overlay_hook;
@@ -847,7 +854,7 @@ static void vote_text(char *out, size_t n, int mask, const char *what)
 }
 
 /* One line on a bar across the top of the screen, row `row` (8 pixels each). */
-static void strip(int row, const char *text)
+void strip(int row, const char *text)
 {
     int w = (int)strlen(text) + 2, x1 = 24 - w / 2;
     for (int x = 0; x < w; x++)
@@ -930,7 +937,10 @@ void ui_overlay_hook(void)
     scroll_y &= ~0xfff;
     char text[64];
     int row = 0;
-    if (game.pause_mask) {
+    if (game.pause_mask & 0xf0) {
+        snprintf(text, sizeof text, "PLAYER %d IS SAVING", bit_first(game.pause_mask >> 4) + 1);
+        strip(row++, text);
+    } else if (game.pause_mask) {
         snprintf(text, sizeof text, "PLAYER %d IS READING HELP", bit_first(game.pause_mask) + 1);
         strip(row++, text);
     }

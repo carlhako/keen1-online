@@ -1,6 +1,9 @@
 import { randomInt } from 'node:crypto';
+import { join } from 'node:path';
 import type { ServerConfig } from './config.ts';
 import { Game, type GameDeps, type Player } from './game.ts';
+import { SaveStore } from './saves.ts';
+import { ScoreStore } from './scores.ts';
 import {
   INPUT_RATE,
   MALFORMED_LIMIT,
@@ -27,6 +30,8 @@ export interface HubOptions {
   log?: (message: string) => void;
   /** Debug option: write one frame log per game into this directory. */
   frameLogDir?: string;
+  /** Where saves and the high score table are kept; without it they live in memory only. */
+  dataDir?: string;
 }
 
 class Client implements Player {
@@ -69,6 +74,9 @@ export class Hub {
   private nextGame = 1;
   private nextClient = 1;
   private lastLobby = '';
+  private lastSaves = '';
+  readonly saves: SaveStore;
+  readonly scores: ScoreStore;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly now: () => number;
   private readonly random: () => number;
@@ -79,6 +87,11 @@ export class Hub {
     this.now = opts.now ?? Date.now;
     this.random = opts.random ?? (() => randomInt(0, 2 ** 32) / 2 ** 32);
     this.log = opts.log ?? (() => {});
+    this.saves = new SaveStore(opts.dataDir ? join(opts.dataDir, 'saves') : null, this.log);
+    this.scores = new ScoreStore(
+      opts.dataDir ? join(opts.dataDir, 'highscores.json') : null,
+      this.log,
+    );
     this.deps = {
       config: opts.config,
       now: this.now,
@@ -89,6 +102,8 @@ export class Hub {
         for (const c of this.clients.values()) if (c.game === game) c.game = null;
       },
       log: this.log,
+      scores: this.scores,
+      scoresChanged: () => this.broadcast(this.scoresMessage()),
       frameLogDir: opts.frameLogDir,
     };
     this.timer = setInterval(() => this.tick(), 1000);
@@ -119,7 +134,7 @@ export class Hub {
 
   connect(conn: Conn): void {
     const c = new Client(conn, this.nextClient++);
-    c.onKicked = () => c.send(this.lobbyMessage());
+    c.onKicked = () => this.sendLobby(c);
     this.clients.set(conn, c);
   }
 
@@ -164,6 +179,17 @@ export class Hub {
       case 'create':
         this.onCreate(c);
         break;
+      case 'load':
+        this.onLoad(c, m);
+        break;
+      case 'save':
+        this.onSave(c, m);
+        break;
+      case 'score':
+        if (!c.game?.submitScore(c.game.seatOf(c), m.name, m.score, m.parts)) {
+          this.reject(c, 'invalid');
+        }
+        break;
       case 'join':
         this.onJoin(c, m);
         break;
@@ -177,7 +203,7 @@ export class Hub {
         this.onInput(c, m);
         break;
       case 'sum':
-        if (c.game) c.game.sum(c.game.seatOf(c), m.f, m.c, m.l);
+        if (c.game) c.game.sum(c.game.seatOf(c), m.f, m.c, m.l, m.s);
         break;
       case 'ready':
         if (c.game) c.game.ready(c.game.seatOf(c));
@@ -241,7 +267,7 @@ export class Hub {
         disconnectSec: this.opts.config.disconnectSec,
       },
     });
-    c.send(this.lobbyMessage());
+    this.sendLobby(c);
   }
 
   private reject(c: Client, reason: RejectReason, extra?: { count: number; max: number }): void {
@@ -262,6 +288,44 @@ export class Hub {
     c.game = game;
     this.log(`game ${game.id} created`);
     game.seat(0, c);
+  }
+
+  /** A new game that starts from a save. It counts toward the limit like any other. */
+  private onLoad(c: Client, m: Extract<ClientMessage, { t: 'load' }>): void {
+    if (c.game) {
+      this.reject(c, 'busy');
+      return;
+    }
+    const rec = this.saves.record(m.save);
+    if (!rec) {
+      this.reject(c, 'nosave');
+      return;
+    }
+    if (this.games.size >= this.opts.config.maxGames) {
+      this.reject(c, 'full', { count: this.games.size, max: this.opts.config.maxGames });
+      return;
+    }
+    const game = new Game(this.nextGame++, this.deps, rec);
+    this.games.set(game.id, game);
+    c.game = game;
+    this.log(`game ${game.id} created from save ${m.save}`);
+    game.seat(0, c);
+  }
+
+  /** F5 on the world map: the shared record goes into the save list. */
+  private onSave(c: Client, m: Extract<ClientMessage, { t: 'save' }>): void {
+    const game = c.game;
+    const rec = Buffer.from(m.rec, 'base64');
+    const inGame = game && (game.phase === 'playing' || game.phase === 'paused');
+    const info =
+      inGame && game.loc.kind === 'map' && rec.toString('base64') === m.rec
+        ? this.saves.add(m.name, rec, new Date(this.now()))
+        : null;
+    c.send(info ? { t: 'saved', ok: true, id: info.id } : { t: 'saved', ok: false });
+    if (info) {
+      this.log(`save ${info.id} "${info.name}" made in game ${game?.id}`);
+      this.publishSaves();
+    }
   }
 
   private onJoin(c: Client, m: Extract<ClientMessage, { t: 'join' }>): void {
@@ -301,7 +365,7 @@ export class Hub {
     c.game = null;
     game.drop(game.seatOf(c));
     c.send({ t: 'left' });
-    c.send(this.lobbyMessage());
+    this.sendLobby(c);
   }
 
   // ---- lobby ----
@@ -309,6 +373,35 @@ export class Hub {
   lobbyMessage(): ServerMessage {
     const games: LobbyGame[] = [...this.games.values()].map((g) => g.summary());
     return { t: 'lobby', games, count: this.games.size, max: this.opts.config.maxGames };
+  }
+
+  savesMessage(): ServerMessage {
+    return { t: 'saves', saves: this.saves.list() };
+  }
+
+  scoresMessage(): ServerMessage {
+    return { t: 'scores', rows: this.scores.table() };
+  }
+
+  /** What a browser in the lobby sees: the games, the saves and the high score table. */
+  private sendLobby(c: Client): void {
+    c.send(this.lobbyMessage());
+    c.send(this.savesMessage());
+    c.send(this.scoresMessage());
+  }
+
+  private broadcast(msg: ServerMessage): void {
+    const json = JSON.stringify(msg);
+    for (const c of this.clients.values()) if (c.hello) c.conn.send(json);
+  }
+
+  private publishSaves(): void {
+    const json = JSON.stringify(this.savesMessage());
+    if (json === this.lastSaves) return;
+    this.lastSaves = json;
+    for (const c of this.clients.values()) {
+      if (c.hello && !c.game) c.conn.send(json);
+    }
   }
 
   /** Sends the game list to everyone who is looking at it, when it changed. */

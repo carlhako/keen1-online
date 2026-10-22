@@ -73,7 +73,7 @@
   button:disabled { background: #5555ff; color: #aaaaaa; cursor: default; }
   button.quiet { background: #aaaaaa; }
   .row { display: flex; gap: 0.75em; flex-wrap: wrap; justify-content: center; }
-  #games { list-style: none; margin: 0; padding: 0; width: min(36em, 100%); max-height: 38%; overflow-y: auto; }
+  #games { list-style: none; margin: 0; padding: 0; width: min(36em, 100%); max-height: 11em; overflow-y: auto; }
   #games li {
     display: flex; gap: 0.75em; align-items: center; justify-content: space-between;
     padding: 0.15em 0.6em; font-size: clamp(11px, 1.9vw, 15px);
@@ -83,7 +83,26 @@
   #games .where { flex: 1; text-align: left; color: #ffffff; }
   #games .seats { color: #ffff55; }
   #games li button { padding: 0 0.8em; }
+  #browse { flex: none; display: flex; flex-direction: column; align-items: center; gap: 0.75em; width: 100%; }
+  /* The key list and the fine print make room for the saves and the table. */
+  #lobby[data-view="saves"] table, #lobby[data-view="scores"] table,
+  #lobby[data-view="saves"] .fine, #lobby[data-view="scores"] .fine { display: none; }
   #none { color: #5555ff; margin: 0; }
+  #saves, #scores { list-style: none; margin: 0; padding: 0; width: min(36em, 100%); max-height: 11em; overflow-y: auto; }
+  #scores { max-height: none; overflow: visible; }
+  #saves li, #scores li {
+    display: flex; gap: 0.75em; align-items: center; justify-content: space-between;
+    padding: 0.15em 0.6em; font-size: clamp(11px, 1.9vw, 15px);
+  }
+  #saves li:nth-child(odd), #scores li:nth-child(odd) { background: #0000cc; }
+  #saves .name, #scores .name { color: #55ff55; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #saves .detail { color: #ffffff; white-space: nowrap; }
+  #saves .when { color: #55ffff; white-space: nowrap; }
+  #saves li button { padding: 0 0.8em; }
+  #scores .rank { color: #ffff55; width: 1.5em; text-align: right; }
+  #scores .points { color: #ffffff; min-width: 5em; text-align: right; }
+  #scores .parts { letter-spacing: 0.15em; color: #5555ff; }
+  #scores .parts b { color: #ffff55; font-weight: normal; }
   #msg { color: #ffffff; min-height: 1.5em; margin: 0; }
   #msg.bad { color: #ff5555; }
   #waiting h2 { margin: 0; color: #ffffff; font-size: clamp(14px, 3vw, 24px); }
@@ -107,9 +126,15 @@
     <div id="browse">
       <ul id="games"></ul>
       <p id="none" hidden>No games running. Start one!</p>
+      <ul id="saves" hidden></ul>
+      <p id="nosaves" hidden>No saved games yet. Press F5 on the world map to save one.</p>
+      <ul id="scores" hidden></ul>
       <div class="row">
         <button id="new" type="button" disabled>New game</button>
         <button id="retry" type="button" class="quiet" hidden>Retry</button>
+        <button id="loadgame" type="button" class="quiet">Load game</button>
+        <button id="highscores" type="button" class="quiet">High scores</button>
+        <button id="back" type="button" class="quiet" hidden>Back</button>
       </div>
     </div>
     <div id="waiting" hidden>
@@ -174,6 +199,7 @@
     // ---- the lobby ----
 
     var net = null;
+    var view = 'games';                 // what the lobby shows: games | saves | scores
     function lobbyInit() {
       net = Module.net;
       net.onchange = render;
@@ -186,6 +212,9 @@
       $('retry').addEventListener('click', function () { net.create(); });
       $('single').addEventListener('click', function () { net.single(); });
       $('cancel').addEventListener('click', function () { net.leave(); });
+      $('loadgame').addEventListener('click', function () { view = 'saves'; render(); });
+      $('highscores').addEventListener('click', function () { view = 'scores'; render(); });
+      $('back').addEventListener('click', function () { view = 'games'; render(); });
       $('continue').addEventListener('click', function () { net.continueSolo(); });
       $('leave').addEventListener('click', function () { net.leave(); });
       net.connect();
@@ -196,6 +225,7 @@
       if (g.phase === 'waiting') return 'waiting for player 2';
       var text = g.loc.kind === 'level' ? 'level ' + g.loc.level : 'world map';
       if (g.phase === 'paused') text += ' (paused)';
+      if (g.phase === 'scoring') text = 'finished (high scores)';
       if (g.phase === 'empty') text += ' (empty, kept for a minute)';
       return text;
     }
@@ -228,6 +258,53 @@
       $('none').hidden = games.length > 0;
     }
 
+    function text(tag, cls, content) {
+      var e = document.createElement(tag);
+      e.className = cls;
+      e.textContent = content;
+      return e;
+    }
+
+    // Every save on the server, newest first: loading one starts a new game from it.
+    function renderSaves(saves) {
+      var list = $('saves');
+      list.textContent = '';
+      var full = !!net.lobby && net.lobby.count >= net.lobby.max;
+      saves.forEach(function (sv) {
+        var li = document.createElement('li');
+        var when = new Date(sv.date);
+        li.appendChild(text('span', 'name', sv.name));
+        li.appendChild(text('span', 'detail', sv.levels + ' levels \u00b7 ' + sv.score + ' pts'));
+        li.appendChild(text('span', 'when', isNaN(when) ? '' : when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' +
+                                            when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })));
+        var b = button('Load', function () { net.load(sv.id); });
+        b.disabled = full;
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+      $('nosaves').hidden = saves.length > 0;
+    }
+
+    var PART_LETTERS = ['J', 'B', 'V', 'W'];       // joystick, battery, vacuum, whiskey
+    function renderScores(rows) {
+      var list = $('scores');
+      list.textContent = '';
+      (rows || []).forEach(function (r, i) {
+        var li = document.createElement('li');
+        li.appendChild(text('span', 'rank', String(i + 1)));
+        li.appendChild(text('span', 'name', r.name));
+        li.appendChild(text('span', 'points', String(r.score)));
+        var parts = document.createElement('span');
+        parts.className = 'parts';
+        PART_LETTERS.forEach(function (letter, bit) {
+          var held = (r.parts >> bit) & 1;
+          parts.appendChild(held ? text('b', '', letter) : document.createTextNode('\u00b7'));
+        });
+        li.appendChild(parts);
+        list.appendChild(li);
+      });
+    }
+
     function render() {
       if (!net) return;
       var msg = $('msg'), bad = false, text = '';
@@ -247,6 +324,8 @@
           bad = true;
         } else if (net.rejected && net.rejected.reason === 'nogame') text = 'That game has ended.';
         else if (net.rejected && net.rejected.reason === 'closed') text = 'That game is full.';
+        else if (view === 'saves') text = 'Pick a saved game to start from.';
+        else if (view === 'scores') text = 'High scores of everybody on this server.';
         else text = 'Pick a game to join, or start a new one.';
         break;
       }
@@ -260,7 +339,19 @@
       $('new').disabled = !inLobby || full;
       $('retry').hidden = !inLobby || !full;
       renderGames(net.lobby ? net.lobby.games : []);
+      renderSaves(net.saves);
+      renderScores(net.scores);
       if (inLobby) $('browse').hidden = false;
+      // One of three lists at a time; the game list is the one people usually want.
+      $('games').hidden = view !== 'games';
+      $('none').hidden = view !== 'games' || (net.lobby ? net.lobby.games.length > 0 : false);
+      $('saves').hidden = view !== 'saves';
+      $('nosaves').hidden = view !== 'saves' || net.saves.length > 0;
+      $('scores').hidden = view !== 'scores';
+      $('loadgame').hidden = view !== 'games';
+      $('highscores').hidden = view !== 'games';
+      $('back').hidden = view === 'games';
+      $('lobby').dataset.view = inLobby ? view : 'games';
 
       // Over the running game
       var p = net.paused;
@@ -272,7 +363,6 @@
         $('pausedmsg').textContent = 'Player ' + p.map(function (s) { return s + 1; }).join(' and ') + ' disconnected';
       }
       if (net.state === 'lost' && running) finish('The connection to the server was lost.');
-      if (net.ended) location.reload();
     }
 
     // Boot information has arrived (a game starts or is joined) and the runtime is loaded.

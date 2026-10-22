@@ -4,6 +4,7 @@
 #   make dist       build and package keen1-linux-x86_64.tar.gz with the game data
 #   make web        browser build in build/web/ (Emscripten; needs emcc on PATH,
 #                   e.g. source ~/tools/emsdk/emsdk_env.sh)
+#   make release    package the online server and web build as keen1-online-<version>.tar.gz
 #
 # SDL2 is found with sdl2-config / pkg-config. Without development packages,
 # point SDL2_DIR at a directory containing include/SDL2/*.h and lib/libSDL2.so.
@@ -110,7 +111,31 @@ test: keen1
 test-online: nodenet
 	node --test tests/online/e2e.test.mjs
 
-clean:
-	rm -rf build keen1 $(DIST) $(DIST).tar.gz
+# Release package of the online game: the built server, the web build (with the shareware episode
+# data inside its index.data), the example config, the installer and the README. It runs with
+# Node 22 and `npm ci --omit=dev` in server/, no build step. The version is the one in
+# server/package.json. The tree must be clean, so a release always matches a commit. Needs emcc
+# on PATH (see `make web`). Publish it with `gh release create v<version> keen1-online-<version>.tar.gz`.
+VERSION := $(shell sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' server/package.json | head -n1)
+RELEASE := keen1-online-$(VERSION)
+RELEASE_DIR := build/release
 
-.PHONY: dist web node nodenet test test-online clean
+release:
+	@test -z "$$(git status --porcelain)" || { \
+		echo "make release: uncommitted changes; commit or stash them first"; git status --short; exit 1; }
+	$(MAKE) web
+	cd server && npm ci && npm run build
+	rm -rf $(RELEASE_DIR) $(RELEASE).tar.gz
+	mkdir -p $(RELEASE_DIR)/$(RELEASE)/server
+	cp -r server/dist server/package.json server/package-lock.json $(RELEASE_DIR)/$(RELEASE)/server/
+	cp -r $(WEB_OUT) $(RELEASE_DIR)/$(RELEASE)/web
+	cp -r deploy $(RELEASE_DIR)/$(RELEASE)/deploy
+	cp server/config.example.json .nvmrc README.md $(RELEASE_DIR)/$(RELEASE)/
+	git rev-parse HEAD > $(RELEASE_DIR)/$(RELEASE)/COMMIT
+	tar czf $(RELEASE).tar.gz -C $(RELEASE_DIR) $(RELEASE)
+	@echo "built $(RELEASE).tar.gz from $$(git rev-parse --short HEAD)"
+
+clean:
+	rm -rf build keen1 $(DIST) $(DIST).tar.gz keen1-online-*.tar.gz
+
+.PHONY: dist web node nodenet test test-online release clean

@@ -35,6 +35,18 @@ describe('http', () => {
     expect(await res.json()).toEqual({ status: 'ok', games: 0, players: 0, buildId: 'abc123' });
   });
 
+  it('reports the release version when it is given one', async () => {
+    const versioned = new GameServer({
+      config: { ...defaultConfig(), port: 0 },
+      webDir: dir,
+      version: '1.2.3',
+    });
+    const port = await versioned.listen();
+    const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(await res.json()).toMatchObject({ status: 'ok', version: '1.2.3' });
+    await versioned.close();
+  });
+
   it('answers 404 for missing files and does not leave the web directory', async () => {
     expect((await fetch(`${base}/nope.js`)).status).toBe(404);
     expect((await fetch(`${base}/../package.json`)).status).toBe(404);

@@ -144,15 +144,20 @@ describe('joining a running game', () => {
 });
 
 describe('the end of a game', () => {
-  it('ends for both players when both have watched the ending, and they are back at the lobby', async () => {
+  it('moves both players to the high score table when both have watched the ending, and ends when they leave', async () => {
     const [a, b] = await pair();
     await a.waitFrame(60);
     await a.request('finished');
     await sleep(200);
-    assert.equal(server.hub.games.size, 1, 'one player finishing is not enough');
+    assert.equal((await a.status()).ended, false, 'one player finishing is not enough');
     await b.request('finished');
-    await until(() => server.hub.games.size === 0, 'the game to end');
     await until(async () => (await a.status()).ended && (await b.status()).ended, 'both told');
+    // The score is too low for the table: nobody is asked for a name, and the game waits for the
+    // players to look at the table and leave.
+    assert.equal(server.hub.games.size, 1);
+    await a.request('leave');
+    await b.request('leave');
+    await until(() => server.hub.games.size === 0, 'the game to end');
   });
 });
 

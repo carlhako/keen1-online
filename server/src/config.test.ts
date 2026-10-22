@@ -23,6 +23,7 @@ describe('parseConfig', () => {
         disconnectSec: 15,
         emptyGameSec: 60,
         checkpointFrames: 240,
+        dataDir: 'data',
       },
     });
     expect(defaultConfig().maxGames).toBe(5);
@@ -32,6 +33,13 @@ describe('parseConfig', () => {
     const r = parseConfig({ port: 9000, maxGames: 2, emptyGameSec: 0 });
     expect(r.ok && r.config).toMatchObject({ port: 9000, maxGames: 2, emptyGameSec: 0 });
     expect(r.ok && r.config.checkpointFrames).toBe(240);
+  });
+
+  it('takes a data directory and refuses an empty one', () => {
+    const r = parseConfig({ dataDir: '/var/lib/keen1-online' });
+    expect(r.ok && r.config.dataDir).toBe('/var/lib/keen1-online');
+    expect(parseConfig({ dataDir: '' }).ok).toBe(false);
+    expect(parseConfig({ dataDir: 5 }).ok).toBe(false);
   });
 
   it('rejects bad values, all at once', () => {

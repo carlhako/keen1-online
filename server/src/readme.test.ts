@@ -53,7 +53,8 @@ describe('server/README.md', () => {
 
   it('documents every configuration key with its default', () => {
     for (const [key, value] of Object.entries(defaultConfig())) {
-      expect(readme).toMatch(new RegExp(`\\| \`${key}\`\\s*\\| ${value}\\s*\\|`));
+      const shown = typeof value === 'string' ? `"${value}"` : String(value);
+      expect(readme).toMatch(new RegExp(`\\| \`${key}\`\\s*\\| ${shown}\\s*\\|`));
     }
   });
 });
