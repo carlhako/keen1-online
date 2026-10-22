@@ -16,6 +16,9 @@ so add the entry with the version bump.
 - **The installer cannot run half-downloaded.** `install.sh` does all its work in a function
   called on its last line, so a `curl | bash` cut off part way through runs nothing. CI checks
   this for every possible cut.
+- **The game files load as one download.** The page fetches all 31 files as a single
+  `data/game.tar.gz` and unpacks it in the browser, falling back to the single files. This gets
+  the game past web filters (such as some corporate proxies) that block the binary files one by one.
 - **No native player package.** `make dist` and its launcher script are gone, and the docs no
   longer describe playing the game as a Linux program. The native build stays as the tool the
   determinism tests use.

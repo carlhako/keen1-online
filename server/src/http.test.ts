@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -112,6 +113,7 @@ describe('router', () => {
     expect(route('/keen/data/index.json')).toEqual({ kind: 'dataIndex' });
     expect(route('/keen/data/LEVEL01.CK1')).toEqual({ kind: 'data', name: 'LEVEL01.CK1' });
     expect(route('/keen/data/level01.ck1')).toEqual({ kind: 'notFound' });
+    expect(route('/keen/data/game.tar.gz')).toEqual({ kind: 'dataBundle' });
   });
 
   it('serves the index for a path ending in a slash', () => {
@@ -182,6 +184,36 @@ describe('game data', () => {
     ]) {
       expect((await fetch(`${dataBase}${path}`)).status).toBe(404);
     }
+  });
+
+  it('sends every game file in one tar.gz that tar unpacks byte for byte', async () => {
+    for (const name of GAME_FILES.slice(1))
+      writeFileSync(join(gameDir, name), `${name} `.repeat(300));
+    expect((await fetch(`${dataBase}/data/game.tar.gz`)).status).toBe(404);
+    const exe = Buffer.from(Array.from({ length: 1000 }, (_, i) => (i * 7) % 256));
+    writeFileSync(join(gameDir, GAME_FILES[0]!), exe);
+
+    const res = await fetch(`${dataBase}/keen/data/game.tar.gz`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/gzip');
+    const out = join(dir, 'unpacked');
+    mkdirSync(out);
+    writeFileSync(join(dir, 'game.tar.gz'), Buffer.from(await res.arrayBuffer()));
+    execFileSync('tar', ['-xzf', join(dir, 'game.tar.gz'), '-C', out]);
+    expect(readFileSync(join(out, GAME_FILES[0]!))).toEqual(exe);
+    for (const name of GAME_FILES.slice(1)) {
+      expect(readFileSync(join(out, name), 'utf8')).toBe(`${name} `.repeat(300));
+    }
+
+    const again = await fetch(`${dataBase}/data/game.tar.gz`, {
+      headers: { 'If-None-Match': res.headers.get('etag') ?? '' },
+    });
+    expect(again.status).toBe(304);
+    writeFileSync(join(gameDir, GAME_FILES[1]!), 'changed');
+    const rebuilt = await fetch(`${dataBase}/data/game.tar.gz`, {
+      headers: { 'If-None-Match': res.headers.get('etag') ?? '' },
+    });
+    expect(rebuilt.status).toBe(200);
   });
 
   it('flips /healthz to ok when every game file is there', async () => {

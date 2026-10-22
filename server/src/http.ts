@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import sirv from 'sirv';
+import { BUNDLE_NAME, tarGz } from './bundle.ts';
 import { GAME_FILES } from './gamefiles.ts';
 
 export interface Health {
@@ -29,6 +31,8 @@ export type Route =
   | { kind: 'ws' }
   | { kind: 'healthz' }
   | { kind: 'dataIndex' }
+  /** Every game file in one gzip-compressed tar archive. */
+  | { kind: 'dataBundle' }
   | { kind: 'data'; name: string }
   /** A file of the web build; `url` is the path to hand to the file server. */
   | { kind: 'file'; url: string }
@@ -81,6 +85,7 @@ export function createRouter(webFiles: ReadonlySet<string>): (rawPath: string) =
       if (joined === 'ws') return { kind: 'ws' };
       if (joined === 'healthz') return { kind: 'healthz' };
       if (joined === 'data/index.json') return { kind: 'dataIndex' };
+      if (joined === `data/${BUNDLE_NAME}`) return { kind: 'dataBundle' };
       if (tail.length === 2 && tail[0] === 'data' && gameFiles.has(tail[1]!)) {
         return { kind: 'data', name: tail[1]! };
       }
@@ -172,6 +177,11 @@ export function createHttpHandler(opts: HttpOptions): {
       void sendGameFile(req, res, join(opts.gameDir, target.name));
       return;
     }
+    if (target.kind === 'dataBundle') {
+      if (!readOnly || !opts.gameDir) return notFound(res);
+      void sendBundle(req, res, opts.gameDir);
+      return;
+    }
     if (target.kind === 'redirect') {
       const query = (req.url ?? '').split('?').slice(1).join('?');
       res.writeHead(302, {
@@ -214,6 +224,61 @@ async function sendGameFile(
   }
   res.writeHead(200, {
     'Content-Type': 'application/octet-stream',
+    'Content-Length': data.length,
+    'Cache-Control': 'no-cache',
+    ETag: etag,
+  });
+  res.end(req.method === 'HEAD' ? undefined : data);
+}
+
+/** The last archive built, kept until a game file changes. */
+let bundleCache: { key: string; etag: string; body: Promise<Buffer> } | null = null;
+
+/**
+ * Sends every game file as one `tar.gz` (see `bundle.ts`), for networks whose web filters block
+ * the single binary files. Only a complete set is sent; the archive is built once and rebuilt when
+ * a file's size or time changes.
+ */
+async function sendBundle(
+  req: IncomingMessage,
+  res: ServerResponse,
+  gameDir: string,
+): Promise<void> {
+  let key = '';
+  try {
+    for (const name of GAME_FILES) {
+      const st = await stat(join(gameDir, name));
+      if (!st.isFile()) throw new Error(name);
+      key += `${name}:${st.size}:${Math.round(st.mtimeMs)};`;
+    }
+  } catch {
+    notFound(res);
+    return;
+  }
+  if (bundleCache?.key !== key) {
+    const body = Promise.all(
+      GAME_FILES.map(async (name) => ({ name, data: await readFile(join(gameDir, name)) })),
+    ).then(tarGz);
+    const hash = createHash('sha256').update(key).digest('hex').slice(0, 16);
+    bundleCache = { key, etag: `W/"${hash}"`, body };
+    body.catch(() => {
+      if (bundleCache?.body === body) bundleCache = null;
+    });
+  }
+  const { etag, body } = bundleCache;
+  let data: Buffer;
+  try {
+    data = await body;
+  } catch {
+    notFound(res);
+    return;
+  }
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' }).end();
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'application/gzip',
     'Content-Length': data.length,
     'Cache-Control': 'no-cache',
     ETag: etag,

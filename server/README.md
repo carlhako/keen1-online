@@ -25,8 +25,10 @@ Saves and the high score table are files under `dataDir` (see [Saves and the hig
 
 The 31 Keen 1 shareware files the page needs live in `dataDir/game/` (the installer puts them there;
 the server logs `NO GAME DATA` at start when they are missing). The server lists them at `data/index.json`
-and serves each at `data/<NAME>` (only names from its fixed list, `src/gamefiles.ts`); the page fetches
-them before the game starts.
+and serves each at `data/<NAME>` (only names from its fixed list, `src/gamefiles.ts`), and all of them as
+one gzip-compressed tar at `data/game.tar.gz` once the set is complete (built in memory, rebuilt when a
+file changes). The page fetches the archive before the game starts, and the files one by one if that
+fails; some web filters block the single binary files but let the archive through.
 
 `/healthz` answers `{"status":"ok","games":N,"players":N,"buildId":"...","gameData":"ok","version":"..."}`;
 `gameData` is `missing` until all the game files are in place, and `version` is the release's
