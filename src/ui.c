@@ -993,7 +993,7 @@ void ui_overlay_hook(void)
         win_center(w + 2, n);
         for (int i = 0; i < n; i++) {
             cur_x = margin_x + 1;
-            cur_y = win_cy - n / 2 + i;
+            cur_y = win_cy - n / 2 + 1 + i;
             print(lines[i]);
         }
         break;
