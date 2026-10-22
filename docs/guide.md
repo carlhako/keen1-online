@@ -133,7 +133,7 @@ unpacker, the README and these guides. It holds no game data (see [Game data](#g
 needs Node 22 (see [`.nvmrc`](../.nvmrc)) and no build step:
 
 ```
-tar xzf keen1-online-0.2.1.tar.gz && cd keen1-online-0.2.1/server
+tar xzf keen1-online-0.3.0.tar.gz && cd keen1-online-0.3.0/server
 npm ci --omit=dev
 mkdir -p data/game    # then copy the game files into it, see Game data
 npm start
@@ -242,7 +242,7 @@ and where they are (the world map or a level). The server runs at most 5 games a
 - When the server is full, New game is disabled and says *Server full (5/5)*; **Retry** tries again. Joining games with an open seat still works.
 - If your partner's connection closes (or stops sending for 15 seconds), your game pauses
   with *Player 2 disconnected* and **Continue single player**: their Keen goes, and the level
-  carries on under the co-op rules (if nobody is left alive, the level fails and restarts).
+  carries on under the co-op rules (a Keen that dies starts again at the beginning of the level).
   Anybody from the lobby can take the open seat; joining while you are paused resumes the game
   with both of you.
 - A browser that closed or lost a game sees it marked **Rejoin** in the lobby while its seat
@@ -252,6 +252,10 @@ and where they are (the world map or a level). The server runs at most 5 games a
   on by itself when their inputs arrive again (after 15 seconds they are dropped).
 - Esc opens the menu: **L** leaves the game (the lobby shows it, your seat opens), **M** votes
   to return to the map.
+- **C** opens a chat prompt at the bottom of the screen: type up to 32 characters and press
+  Enter (Esc cancels). Your Keen stands still while you type; the game does not pause. The line
+  shows at the top of both players' screens for 15 seconds, the newest three at a time. Chat goes
+  through the server beside the game and is not saved anywhere.
 - After the ending the high score table is entered and shown (see [High scores](#high-scores)),
   then both of you are back at the lobby and the game is removed.
 - When the game stops (it crashed, or the connection to the server was lost) a *Thanks for

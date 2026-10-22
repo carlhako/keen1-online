@@ -4,6 +4,30 @@ Each released version has a section headed `## <version> - <date>`. The release 
 publishes that section as the GitHub release notes. A tag without a section here is not published,
 so add the entry with the version bump.
 
+## 0.3.0 - 2026-10-22
+
+### What's new
+
+- **A Keen that dies starts again at the beginning of the level.** In co-op the level no longer
+  restarts when everybody has died: each Keen comes back at the level start once its death has
+  played out, and the level, its enemies and everything collected stay as they are. Once one of
+  you has walked out of the exit, a death of the other ends the level as done. Hold **R** (both
+  players) to restart a level as before.
+- **"PLAYER 2 HAS FINISHED THE LEVEL".** When your partner walks out of the exit, a bar at the top
+  of your screen says so until the level ends.
+- **You hear what is on your screen.** Your partner's jumps, shots and pickups, and enemies near
+  them, are heard only while they are on your screen. A partner dying, a door opening and a Keen
+  walking into the exit are heard by everybody.
+- **Chat.** Press **C** in an online game, type a line (up to 32 characters) and press Enter; both
+  players see it at the top of the screen for 15 seconds. Esc cancels. The game does not pause
+  while you type. Chat goes through the server (at most five lines per player in ten seconds) and
+  is not stored.
+
+### Upgrading
+
+Run the installer again. Nothing else changes: the same paths, options and service. Reload any
+open game pages after the upgrade.
+
 ## 0.2.1 - 2026-10-22
 
 ### What's new
