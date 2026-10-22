@@ -21,3 +21,6 @@ __pycache__/
 
 # Release packages (make release)
 keen1-online-*.tar.gz
+
+# CI: setup-emsdk cache
+emsdk-cache/
