@@ -51,7 +51,7 @@ environment overrides `port`. An unknown key is reported and ignored, a bad valu
 | `port`             | 8080    | TCP port for the page and `/ws`.                                                               |
 | `maxGames`         | 5       | Games that may exist at once, in any phase, until they are removed.                            |
 | `inputLeadMax`     | 6       | The most frames ahead a browser may schedule its input (it is told in `welcome`).              |
-| `disconnectSec`    | 15      | Seconds the game waits for a player's input before dropping that player.                       |
+| `disconnectSec`    | 600     | Seconds the game waits for a player's input before dropping that player.                       |
 | `emptyGameSec`     | 60      | Seconds a game with nobody in it is kept, joinable, before it is removed.                      |
 | `checkpointFrames` | 240     | Frames between checkpoints (a multiple of 24, the checksum interval).                          |
 | `dataDir`          | "data"  | Directory for saves and the high score table. A relative path starts at the working directory. |

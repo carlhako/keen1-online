@@ -269,6 +269,8 @@ state they use (`game_t`) is part of every snapshot and checksum. Without `--loc
   A Keen is exited when he walks through the exit door, and the others see "PLAYER N HAS
   FINISHED THE LEVEL" at the top. A dead or exited player's screen follows the
   lowest-numbered player still alive.
+- Ammo is one shared counter, and a raygun pickup gives seven shots instead of five, since
+  more players waste more shots.
 - The level succeeds when nobody is alive and at least one player exited: it is marked done,
   what was collected is kept, and everybody returns to the map.
 - The shared record (score, ammo, keycards, ship parts, pogo, completed levels) is rolled

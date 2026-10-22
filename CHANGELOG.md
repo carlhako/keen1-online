@@ -4,6 +4,21 @@ Each released version has a section headed `## <version> - <date>`. The release 
 publishes that section as the GitHub release notes. A tag without a section here is not published,
 so add the entry with the version bump.
 
+## Unreleased
+
+### What's new
+
+- **More shots from each raygun.** In co-op a raygun pickup gives 7 shots instead of 5. All
+  players share one ammo counter, so there are more shots wasted. Single-player games still give 5.
+- **Switching away no longer drops you from an online game.** A hidden tab sends no input, and
+  the server used to drop that player after 15 seconds. It now waits 10 minutes
+  (`disconnectSec` defaults to 600). While it waits, your partner sees *Waiting for player 2*.
+
+### Upgrading
+
+The installer does not overwrite an existing `/etc/keen1-online/config.json`, which still has
+`"disconnectSec": 15`. Change it to `600` and run `systemctl restart keen1-online`.
+
 ## 0.3.0 - 2026-10-22
 
 ### What's new

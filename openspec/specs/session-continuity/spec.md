@@ -8,7 +8,7 @@ dropped connection never loses the game for the player who is still there.
 ## Requirements
 
 ### Requirement: Disconnect pauses the game
-When a player's connection closes, or no input arrives from them for 15 seconds, the server SHALL
+When a player's connection closes, or no input arrives from them for 10 minutes, the server SHALL
 remove them from the game and open their seat. The remaining player's game SHALL pause with
 "Player 2 disconnected" and a **Continue single player** button.
 
@@ -44,8 +44,8 @@ remaining player is paused SHALL resume the game with both players.
 
 ### Requirement: Stalled player
 While a browser has stopped sending inputs (for example a hidden tab), the other player's game SHALL
-wait and show "Waiting for player 2", and SHALL resume by itself when inputs arrive again within 15
-seconds.
+wait and show "Waiting for player 2", and SHALL resume by itself when inputs arrive again within 10
+minutes.
 
 #### Scenario: Partner switches tabs briefly
 - **WHEN** player 2 switches to another tab for 5 seconds

@@ -240,7 +240,7 @@ and where they are (the world map or a level). The server runs at most 5 games a
   player, or paused. Your Keen appears on top of the other Keen, in the level or on the map,
   and the game goes on without stopping. A game with 2 players has no Join button.
 - When the server is full, New game is disabled and says *Server full (5/5)*; **Retry** tries again. Joining games with an open seat still works.
-- If your partner's connection closes (or stops sending for 15 seconds), your game pauses
+- If your partner's connection closes (or stops sending for 10 minutes), your game pauses
   with *Player 2 disconnected* and **Continue single player**: their Keen goes, and the level
   carries on under the co-op rules (a Keen that dies starts again at the beginning of the level).
   Anybody from the lobby can take the open seat; joining while you are paused resumes the game
@@ -249,7 +249,7 @@ and where they are (the world map or a level). The server runs at most 5 games a
   is open, and rejoining puts it back as the same player. A game nobody is in is kept for
   60 seconds, listed as 0/2, and then removed.
 - If your partner's tab is hidden or busy, you see *Waiting for player 2* and the game goes
-  on by itself when their inputs arrive again (after 15 seconds they are dropped).
+  on by itself when their inputs arrive again (after 10 minutes they are dropped).
 - Esc opens the menu: **L** leaves the game (the lobby shows it, your seat opens), **M** votes
   to return to the map.
 - **C** opens a chat prompt at the bottom of the screen: type up to 32 characters and press

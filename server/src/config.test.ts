@@ -20,7 +20,7 @@ describe('parseConfig', () => {
         port: 8080,
         maxGames: 5,
         inputLeadMax: 6,
-        disconnectSec: 15,
+        disconnectSec: 600,
         emptyGameSec: 60,
         checkpointFrames: 240,
         dataDir: 'data',

@@ -36,7 +36,7 @@ const FIELDS: { [K in NumericKey]: Field } = {
   port: { def: 8080, min: 0, max: 65535 },
   maxGames: { def: 5, min: 1, max: 100 },
   inputLeadMax: { def: 6, min: 2, max: 60 },
-  disconnectSec: { def: 15, min: 1, max: 3600 },
+  disconnectSec: { def: 600, min: 1, max: 3600 },
   emptyGameSec: { def: 60, min: 0, max: 86400 },
   checkpointFrames: {
     def: 240,

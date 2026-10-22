@@ -1256,7 +1256,7 @@ static void keen_tiles(int i)
                 set_tile(tx, ty, 0x8f);
                 break;
             case 15: case 16:
-                if (b == 15) gs.ammo += 5;
+                if (b == 15) gs.ammo += game.coop ? 7 : 5;  /* co-op: more shots go astray */
                 if (b == 16) gs.pogo = 1;
                 snd_play(10);
                 set_tile(tx, ty, 0x8f);

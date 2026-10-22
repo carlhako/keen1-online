@@ -21,7 +21,7 @@ describe('handshake', () => {
     expect(c.messages[0]).toEqual({
       t: 'welcome',
       v: PROTOCOL_VERSION,
-      cfg: { checkpointFrames: 240, inputLeadMax: 6, disconnectSec: 15 },
+      cfg: { checkpointFrames: 240, inputLeadMax: 6, disconnectSec: 600 },
     });
     expect(c.messages[1]).toEqual({ t: 'lobby', games: [], count: 0, max: 5 });
     expect(c.closed).toBe(false);

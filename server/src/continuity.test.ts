@@ -44,7 +44,7 @@ describe('disconnects', () => {
     });
   });
 
-  it('drops a seat that sent no input for 15 seconds, and only the one being waited for', () => {
+  it('drops a seat that sent no input for 10 minutes, and only the one being waited for', () => {
     hub = makeHub();
     const [a, b] = startedGame(hub);
     inputs(hub, [a, b], 0, 5);
@@ -52,7 +52,7 @@ describe('disconnects', () => {
     b.clear();
     // a sent input for frame 5; b did not. The game waits for b.
     send(hub, a, { t: 'input', f: 5, b: 8 });
-    vi.advanceTimersByTime(14_000);
+    vi.advanceTimersByTime(599_000);
     expect(a.all('paused')).toHaveLength(0);
     vi.advanceTimersByTime(2_000);
     expect(a.last('paused')).toEqual({ t: 'paused', seats: [1] });
@@ -73,12 +73,12 @@ describe('disconnects', () => {
     expect(frames(a)).toHaveLength(30);
   });
 
-  it("resumes by itself when a stalled player's inputs come again within 15 seconds", () => {
+  it("resumes by itself when a stalled player's inputs come again within 10 minutes", () => {
     hub = makeHub();
     const [a, b] = startedGame(hub);
     inputs(hub, [a, b], 0, 5);
     send(hub, a, { t: 'input', f: 5, b: 8 });
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(300_000); // a tab hidden for five minutes
     expect(frames(a)).toHaveLength(5);
     send(hub, b, { t: 'input', f: 5, b: 8 });
     expect(frames(a)).toHaveLength(6);
@@ -225,7 +225,7 @@ describe('joining a running game', () => {
   });
 
   it('drops a newcomer that stops answering while catching up', () => {
-    hub = makeHub();
+    hub = makeHub({ disconnectSec: 15 });
     const a = soloGame();
     const b = client(hub);
     send(hub, b, { t: 'join', game: 1 });
