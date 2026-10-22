@@ -23,7 +23,7 @@
 
 - [x] 4.1 Make `make release` data-free: no `shareware/data` needed, `tools/unshr.py` copied into the package, `deploy/` included. Verify the tarball lists no `.CK1`/`KEEN1.EXE` (a check added to the `release` target that fails if it finds any) and installs with `KO_TARBALL`.
 - [x] 4.2 Add `CHANGELOG.md` (format as in cobble: a `## <version> - <date>` heading per release) with a `0.2.0` section, and `.github/scripts/release-notes.sh` adapted from `bedrock-server`. Verify `release-notes.sh v0.2.0` prints the section and exits non-zero for a version with no entry.
-- [ ] 4.3 Add `.github/workflows/release.yml` per design D6 (tag trigger plus manual dry run, tag must match `server/package.json`, Emscripten 6.0.13, Node from `.nvmrc`, tarball and `install.sh` uploaded, publish only on a tag). Verify by running the dry run from the Actions tab and downloading its artifacts, and check the tarball with `tar -tzf`.
+- [x] 4.3 Add `.github/workflows/release.yml` per design D6 (tag trigger plus manual dry run, tag must match `server/package.json`, Emscripten 6.0.13, Node from `.nvmrc`, tarball and `install.sh` uploaded, publish only on a tag). Verify by running the dry run from the Actions tab and downloading its artifacts, and check the tarball with `tar -tzf`.
 - [ ] 4.4 Update `ci.yml` so the replay tests can use the Internet Archive zip (find the game files in the zip), set the `KEEN_SHAREWARE_URL` variable on the repository, and verify the `Game` job runs the replay tests instead of skipping them.
 
 ## 5. README and spec
@@ -34,7 +34,7 @@
 ## 6. Release 0.2.0
 
 - [x] 6.1 Bump `server/package.json` (and the lockfile) to `0.2.0`; run the server tests, lint, typecheck and `make test`; commit.
-- [ ] 6.2 Push, run the dry run, tag `v0.2.0` after the user agrees, wait for the workflow, and verify `https://github.com/carlhako/keen1-online/releases/latest/download/install.sh` downloads and the release notes show the changelog section.
+- [x] 6.2 Push, run the dry run, tag `v0.2.0` after the user agrees, wait for the workflow, and verify `https://github.com/carlhako/keen1-online/releases/latest/download/install.sh` downloads and the release notes show the changelog section.
 - [ ] 6.3 On the server at `10.0.1.182`: run the installer, confirm `/healthz` and the lobby at `https://<proxy>/keen/`, and play a game through the proxy.
 
 ## Workflow follow-up
