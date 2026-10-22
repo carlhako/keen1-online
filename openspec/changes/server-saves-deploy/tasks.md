@@ -22,7 +22,7 @@ run with `npm test` in `server/`.
 ## 3. Release and CI
 
 - [x] 3.1 Add `.nvmrc` (22) and `make release` producing `keen1-online-<version>.tar.gz` (refusing with uncommitted changes); verify extracting it, `npm ci --omit=dev` in `server/` and `npm start` serve a playable lobby
-- [ ] 3.2 Add `.github/workflows/ci.yml` running server lint, typecheck and tests, the native build and the replay determinism test; verify the workflow passes on a push
+- [x] 3.2 Add `.github/workflows/ci.yml` running server lint, typecheck and tests, the native build and the replay determinism test; verify the workflow passes on a push
 - [ ] 3.3 Document releasing (`make release`, `gh release create`) in `README.md`; verify by publishing the first release
 
 ## 4. Installer and service
