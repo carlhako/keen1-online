@@ -15,6 +15,7 @@ static uint8_t font[256][64];
 static uint8_t tilepix[NUMTILES][256];
 
 int32_t scroll_x, scroll_y;
+int32_t view_lo, view_hi;
 int anim_shift = 3;
 void (*rf_hook)(void);
 
@@ -136,8 +137,8 @@ static void put_tile(int px, int py, int tile)
             continue;
         for (int x = 0; x < 16; x++) {
             int sx = px + x;
-            if (sx >= 0 && sx < SCR_W)
-                screen[sy * SCR_W + sx] = src[y * 16 + x];
+            if (sx >= 0 && sx < scr_w)
+                screen[sy * SCR_MAXW + sx] = src[y * 16 + x];
         }
     }
 }
@@ -156,27 +157,29 @@ static void put_sprite(int px, int py, int n, int remap)
         for (int x = 0; x < s->w; x++) {
             int sx = px + x;
             int i = y * s->w + x;
-            if (sx >= 0 && sx < SCR_W && !s->mask[i])
-                screen[sy * SCR_W + sx] = remap ? remap_p2[s->pix[i]] : s->pix[i];
+            if (sx >= 0 && sx < scr_w && !s->mask[i])
+                screen[sy * SCR_MAXW + sx] = remap ? remap_p2[s->pix[i]] : s->pix[i];
         }
     }
 }
 
 static int fine_x(void) { return (scroll_x >> 8) & 15; }
 static int fine_y(void) { return (scroll_y >> 8) & 15; }
+/* Text and windows are laid out on the 320 wide page; over a wider view they sit in the middle. */
+static int view_ox(void) { return (scr_w - SCR_BASEW) / 2; }
 
 void draw_char(int col, int y, int ch)
 {
     const uint8_t *src = font[ch & 0xff];
-    int px = col * 8 - 32 - fine_x();
+    int px = col * 8 - 32 - fine_x() + view_ox();
     for (int yy = 0; yy < 8; yy++) {
         int sy = y + yy;
         if (sy < 0 || sy >= SCR_H)
             continue;
         for (int x = 0; x < 8; x++) {
             int sx = px + x;
-            if (sx >= 0 && sx < SCR_W)
-                screen[sy * SCR_W + sx] = src[yy * 8 + x];
+            if (sx >= 0 && sx < scr_w)
+                screen[sy * SCR_MAXW + sx] = src[yy * 8 + x];
         }
     }
 }
@@ -186,28 +189,28 @@ void draw_bitmap(int col, int y, int n)
     if (n < 0 || n >= NUMBITMAPS)
         return;
     const bitmap_t *b = &bitmaps[n];
-    int px = col * 8 - 32 - fine_x();
+    int px = col * 8 - 32 - fine_x() + view_ox();
     for (int yy = 0; yy < b->h; yy++) {
         int sy = y + yy;
         if (sy < 0 || sy >= SCR_H)
             continue;
         for (int x = 0; x < b->w; x++) {
             int sx = px + x;
-            if (sx >= 0 && sx < SCR_W)
-                screen[sy * SCR_W + sx] = b->pix[yy * b->w + x];
+            if (sx >= 0 && sx < scr_w)
+                screen[sy * SCR_MAXW + sx] = b->pix[yy * b->w + x];
         }
     }
 }
 
 void draw_tile_at(int col, int y, int tile)
 {
-    put_tile(col * 8 - 32 - fine_x(), y, tile);
+    put_tile(col * 8 - 32 - fine_x() + view_ox(), y, tile);
 }
 
 /* n is sprite*4 + shift, shift being a 2 pixel offset. */
 void draw_sprite_at(int col, int y, int n)
 {
-    put_sprite(col * 8 - 32 - fine_x() + (n & 3) * 2, y, n >> 2, 0);
+    put_sprite(col * 8 - 32 - fine_x() + view_ox() + (n & 3) * 2, y, n >> 2, 0);
 }
 
 void scroll_text_area(int toprow, int botrow, int up)
@@ -216,15 +219,19 @@ void scroll_text_area(int toprow, int botrow, int up)
     if (lines <= 0)
         return;
     if (up)
-        memmove(screen + toprow * 8 * SCR_W, screen + (toprow + 1) * 8 * SCR_W, lines * SCR_W);
+        memmove(screen + toprow * 8 * SCR_MAXW, screen + (toprow + 1) * 8 * SCR_MAXW, lines * SCR_MAXW);
     else
-        memmove(screen + (toprow + 1) * 8 * SCR_W, screen + toprow * 8 * SCR_W, lines * SCR_W);
+        memmove(screen + (toprow + 1) * 8 * SCR_MAXW, screen + toprow * 8 * SCR_MAXW, lines * SCR_MAXW);
 }
 
 /* ------------------------------------------------------------------ */
 /* Frame lists (the game's 0x5E7C sprite list and 0x6A92 tile list). */
 
 extern int map_w, map_h;
+
+/* Tile columns that cover the frame: the original's 21 for 320 pixels (a column more for the
+ * fine scroll), more for a wide view. */
+static int view_cols(void) { return (scr_w + 15) / 16 + 1; }
 
 void rf_begin(void)
 {
@@ -248,9 +255,9 @@ int rf_sprite(int32_t x, int32_t y, int sprite)
 /* A short text label (opaque font glyphs) at a world position. */
 void rf_label(int32_t x, int32_t y, const char *text)
 {
-    int sx = (int)(x / 256) - (int)((scroll_x / 256) & ~15);
+    int sx = (int)(x / 256) - (int)((scroll_x >> 8) & ~15);
     int sy = (int)(y / 256) - (int)((scroll_y / 256) & ~15);
-    if (sx < -32 || sy < -32 || sx > 0x150 || sy > 199 || n_rf_labels >= MAXLABELS)
+    if (sx < -32 || sy < -32 || sx > scr_w + 16 || sy > 199 || n_rf_labels >= MAXLABELS)
         return;
     rf_labels[n_rf_labels].px = sx;
     rf_labels[n_rf_labels].py = sy;
@@ -262,9 +269,9 @@ void rf_label(int32_t x, int32_t y, const char *text)
 /* remap: 0 as drawn, 1 player 2's colour scheme. */
 int rf_sprite_ex(int32_t x, int32_t y, int sprite, int remap)
 {
-    int sx = (int)(x / 256) - (int)((scroll_x / 256) & ~15);
+    int sx = (int)(x / 256) - (int)((scroll_x >> 8) & ~15);
     int sy = (int)(y / 256) - (int)((scroll_y / 256) & ~15);
-    if (sx < -32 || sy < -32 || sx > 0x150 || sy > 199)
+    if (sx < -32 || sy < -32 || sx > scr_w + 16 || sy > 199)    /* 0x150 for 320 */
         return 0;
     if (sprite < 0 || sprite >= NUMSPRITES)
         return 0;
@@ -272,13 +279,13 @@ int rf_sprite_ex(int32_t x, int32_t y, int sprite, int remap)
     int c0 = ((sx + 32) / 8 - 4) / 2;
     if (c0 < 0)
         c0 = 0;
-    else if (c0 > 0x15)
+    else if (c0 > view_cols())          /* 0x15 for 320 */
         return 0;
     /* Shifted sprite copies are one byte wider. */
     int wbytes = sprites[sprite].w / 8 + ((sx & 7) / 2 ? 1 : 0);
     int c1 = ((sx + 32) / 8 - 4 + wbytes - 1) / 2;
-    if (c1 >= 0x16)
-        c1 = 0x15;
+    if (c1 > view_cols())
+        c1 = view_cols();
     else if (c1 < 0)
         return 0;
     int r0 = sy / 16;
@@ -314,7 +321,7 @@ int rf_sprite_ex(int32_t x, int32_t y, int sprite, int remap)
 
 int rf_tile(int32_t x, int32_t y, int tile)
 {
-    int sx = (int)(x / 256) - (int)((scroll_x / 256) & ~15);
+    int sx = (int)(x / 256) - (int)((scroll_x >> 8) & ~15);
     int sy = (int)(y / 256) - (int)((scroll_y / 256) & ~15);
     if (sx < -32 || sy < -32)
         return 0;
@@ -336,7 +343,7 @@ void rf_refresh(void)
     /* drawing only: tile animation does not touch the game state */
     int frame = ((plat_ticks() >> anim_shift) & 6) / 2;
     for (int ty = 0; ty < 14; ty++)
-        for (int tx = 0; tx < 21; tx++) {
+        for (int tx = 0; tx < view_cols(); tx++) {
             int t = map_tile(stx + tx, sty + ty);
             put_tile(tx * 16 - fx, ty * 16 - fy, tile_gfx(t, frame));
         }
@@ -352,10 +359,21 @@ void rf_refresh(void)
             for (int yy = 0; yy < 8; yy++)
                 for (int xx = 0; xx < 8; xx++) {
                     int sx = px + xx, sy = py + yy;
-                    if (sx >= 0 && sx < SCR_W && sy >= 0 && sy < SCR_H)
-                        screen[sy * SCR_W + sx] = g[yy * 8 + xx];
+                    if (sx >= 0 && sx < scr_w && sy >= 0 && sy < SCR_H)
+                        screen[sy * SCR_MAXW + sx] = g[yy * 8 + xx];
                 }
         }
+    /* A wide view never shows past what the original could scroll to: black outside it. */
+    if (scr_w > SCR_BASEW) {
+        int bl = (int)((view_lo >> 8) - (scroll_x >> 8)), br = (int)((view_hi >> 8) - (scroll_x >> 8));
+        for (int y = 0; y < SCR_H; y++) {
+            uint8_t *row = screen + y * SCR_MAXW;
+            if (bl > 0)
+                memset(row, 0, (size_t)(bl > scr_w ? scr_w : bl));
+            if (br < scr_w)
+                memset(row + (br < 0 ? 0 : br), 0, (size_t)(scr_w - (br < 0 ? 0 : br)));
+        }
+    }
     if (rf_hook)
         rf_hook();
     plat_vsync(1);

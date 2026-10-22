@@ -26,6 +26,7 @@ int gfx_load(void);
 
 /* World scroll position (1/256 pixel units), like the game's g_6d00/g_6d04. */
 extern int32_t scroll_x, scroll_y;
+extern int32_t view_lo, view_hi;     /* x range (1/256 px) a wide view may show; black outside it */
 /* Tile animation speed: frame = (ticks >> anim_shift) & 6. */
 extern int anim_shift;
 /* Optional hook drawn on top of each refresh (menus, title bitmaps). */

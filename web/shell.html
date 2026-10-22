@@ -18,12 +18,12 @@
     align-items: center;
     justify-content: center;
   }
-  /* The game draws 320x200 stretched to 4:3, like a CRT. */
+  /* The canvas covers the window and the game fits its picture inside it: 200 lines stretched to
+     4:3 like a CRT, 320 to 480 pixels wide, black around it. */
   #screen {
-    --px: calc(min(100vw, 100vh * 4 / 3) / 320);   /* one pixel of the game's 320x200 screen */
-    position: relative;
-    width: min(100vw, calc(100vh * 4 / 3));
-    aspect-ratio: 4 / 3;
+    --px: min(100vw / 320, 100vh / 240);   /* one pixel of the game's 320x200 screen, as the picture is scaled to the window's height */
+    position: fixed;
+    inset: 0;
   }
   #canvas {
     display: block;

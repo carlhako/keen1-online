@@ -70,6 +70,11 @@ done
 KEEN_NOJITTER=1 ./keen1 --data "$DATA" --replay tests/replays/coop-castle-switch.txt --checksums "$TMP/nojit.ck" > /dev/null
 cmp -s "$TMP/jit.ck" "$TMP/nojit.ck" && ok "castle switch: checksums the same with and without the screen jitter" \
     || bad "castle switch: the jitter reaches the game state"
+# The view width only changes what is drawn: the same replay at 320 and at 480 gives the same checksums.
+KEEN_VIEW_W=320 ./keen1 --data "$DATA" --replay tests/replays/coop-levels-1-4.txt --checksums "$TMP/v320.ck" > /dev/null
+KEEN_VIEW_W=480 ./keen1 --data "$DATA" --replay tests/replays/coop-levels-1-4.txt --checksums "$TMP/v480.ck" > /dev/null
+cmp -s "$TMP/v320.ck" "$TMP/v480.ck" && ok "coop-levels-1-4: checksums the same at view widths 320 and 480" \
+    || bad "coop-levels-1-4: the view width reaches the game state"
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy KEEN_SCRIPT=tests/scripts/coop-levels-1-4.txt \
     ./keen1 --data "$DATA" --local2 --seed 7 --record "$TMP/play.txt" --checksums "$TMP/play.win.ck" > /dev/null
 ./keen1 --data "$DATA" --replay "$TMP/play.txt" --checksums "$TMP/play.head.ck" > "$TMP/out.txt"

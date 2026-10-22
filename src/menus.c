@@ -1806,6 +1806,8 @@ void play_game(void)
                 }
             printf("\n");
         }
+        plat_wide(1);                       /* the world map is a wide view, like a level */
+        view_map_cam = !game.coop;          /* single player: scroll_x is the camera, placed when drawing */
         if (!game.coop) {
             scroll_x = map_sx;
             scroll_y = map_sy;
@@ -1932,6 +1934,8 @@ void play_game(void)
                         printf("replay: all four ship parts: the ending plays\n");
                     } else {
                         net_event(1);   /* online: tell the server the ending started */
+                        plat_wide(0);   /* the ending is made of fixed screens */
+                        view_map_cam = 0;
                         if (!plat_headless())
                             ending();   /* for every player in the game (it waits for keys) */
                         net_event(2);
@@ -1945,6 +1949,8 @@ void play_game(void)
     snd_wait();
     fade_in();
 out:
+    plat_wide(0);                       /* the rest are fixed screens */
+    view_map_cam = 0;
     if (net_online && !ending_done)
         net_idle_forever();     /* the page goes back to the lobby when the server says so */
     if (!replaying)

@@ -216,6 +216,8 @@ void think_dying(void);
 void think_dead(void);
 int check_hotkeys(void);
 void draw_camera(void);                             /* the local player's camera, to the renderer */
+int32_t view_left(int32_t cam_x);                   /* left edge of the drawn frame for a camera at cam_x */
+extern int view_map_cam;                            /* single-player world map: scroll_x is the camera itself */
 void check_cheats(void);
 
 /* Think/touch/special function ids, so snapshots do not hold pointers (sim.c). */

@@ -10,7 +10,11 @@
 #include <emscripten.h>
 #endif
 
-uint8_t screen[SCR_W * SCR_H];
+uint8_t screen[SCR_MAXW * SCR_H];
+int scr_w = SCR_BASEW;
+/* The widest picture the window allows, SCR_BASEW to SCR_MAXW. KEEN_VIEW_W forces it (test aid). */
+static int want_w = SCR_BASEW;
+static int view_w_forced;
 volatile uint8_t keydown[128];
 int snd_enabled = 1;
 
@@ -18,7 +22,6 @@ static SDL_Window *win;
 static SDL_Renderer *ren;
 static SDL_Texture *tex;
 static uint32_t rgb[16];
-static uint32_t border_rgb;
 static uint64_t perf_freq, perf_base;
 static int64_t tick_adjust;
 static int headless;
@@ -54,12 +57,12 @@ void plat_set_palette(const uint8_t regs[17])
 {
     for (int i = 0; i < 16; i++)
         rgb[i] = ega_rgb(regs[i]);
-    border_rgb = ega_rgb(regs[16]);
 }
 
+/* The overscan colour is not shown: what lies outside the picture is black. */
 void plat_set_border(int v)
 {
-    border_rgb = ega_rgb(v);
+    (void)v;
 }
 
 /* ------------------------------------------------------------------ */
@@ -171,6 +174,32 @@ static void push_key(uint16_t k)
     keyq_head = 1;
 }
 
+/* The game pixel is 5:6, so a window of out_w x out_h shows 240 * out_w / out_h pixels across
+ * a 240 high picture. The picture is only that wide when it is a view of a level or the map. */
+static void update_want_w(void)
+{
+    if (view_w_forced || !ren)
+        return;
+    int ow, oh;
+    if (SDL_GetRendererOutputSize(ren, &ow, &oh) != 0 || oh <= 0)
+        return;
+    int w = (int)(240.0 * ow / oh + 0.5);
+    w = w < SCR_BASEW ? SCR_BASEW : w > SCR_MAXW ? SCR_MAXW : w;
+    want_w = w & ~1;
+}
+
+int plat_view_w(void) { return want_w; }
+
+/* Wide mode is on while the picture is a view of a level or the world map; every other screen is
+ * SCR_BASEW wide. scr_w follows the window from here on, so a resize shows from the next frame. */
+int view_wide;
+
+void plat_wide(int on)
+{
+    view_wide = on;
+    scr_w = on ? want_w : SCR_BASEW;
+}
+
 void plat_pump(void)
 {
     if (headless)
@@ -205,6 +234,8 @@ void plat_pump(void)
         case SDL_WINDOWEVENT:
             if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
                 memset((void *)keydown, 0, sizeof keydown);
+            else if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+                update_want_w();
             break;
         }
     }
@@ -337,13 +368,13 @@ static void write_png(const char *path)
     FILE *f = fopen(path, "wb");
     if (!f)
         return;
-    int w = SCR_W, h = SCR_H;
+    int w = scr_w, h = SCR_H;
     size_t rowlen = 1 + w * 3, rawlen = rowlen * h;
     uint8_t *raw = malloc(rawlen);
     for (int y = 0; y < h; y++) {
         raw[y * rowlen] = 0;
         for (int x = 0; x < w; x++) {
-            uint32_t c = rgb[screen[y * w + x] & 15];
+            uint32_t c = rgb[screen[y * SCR_MAXW + x] & 15];
             uint8_t *p = raw + y * rowlen + 1 + x * 3;
             p[0] = c >> 16;
             p[1] = c >> 8;
@@ -442,16 +473,21 @@ void plat_present(void)
     if (SDL_LockTexture(tex, NULL, (void **)&pix, &pitch) == 0) {
         for (int y = 0; y < SCR_H; y++) {
             uint32_t *row = (uint32_t *)((uint8_t *)pix + y * pitch);
-            const uint8_t *src = screen + y * SCR_W;
-            for (int x = 0; x < SCR_W; x++)
+            const uint8_t *src = screen + y * SCR_MAXW;
+            for (int x = 0; x < scr_w; x++)
                 row[x] = rgb[src[x] & 15];
         }
         SDL_UnlockTexture(tex);
     }
-    SDL_SetRenderDrawColor(ren, (border_rgb >> 16) & 0xff, (border_rgb >> 8) & 0xff,
-                           border_rgb & 0xff, 255);
+    static int logical_w;
+    if (logical_w != scr_w) {
+        SDL_RenderSetLogicalSize(ren, scr_w, 240);
+        logical_w = scr_w;
+    }
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
-    SDL_RenderCopy(ren, tex, NULL, NULL);
+    SDL_Rect src = {0, 0, scr_w, SCR_H};
+    SDL_RenderCopy(ren, tex, &src, NULL);
     SDL_RenderPresent(ren);
 }
 
@@ -608,6 +644,12 @@ void snd_wait(void)
 
 int plat_init(int scale, int fullscreen)
 {
+    const char *vw = getenv("KEEN_VIEW_W");
+    if (vw && atoi(vw) > 0) {
+        int w = atoi(vw);
+        want_w = (w < SCR_BASEW ? SCR_BASEW : w > SCR_MAXW ? SCR_MAXW : w) & ~1;
+        view_w_forced = 1;
+    }
     if (headless) {
         if (SDL_Init(SDL_INIT_TIMER) != 0) {
             fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -636,11 +678,12 @@ int plat_init(int scale, int fullscreen)
         fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError());
         return -1;
     }
-    /* 320x200 shown at 4:3 like a CRT. */
-    SDL_RenderSetLogicalSize(ren, 320, 240);
-    tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SCR_W,
+    /* 320x200 shown at 4:3 like a CRT. plat_present sets the logical size to the frame's width. */
+    SDL_RenderSetLogicalSize(ren, SCR_BASEW, 240);
+    tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SCR_MAXW,
                             SCR_H);
     SDL_ShowCursor(SDL_DISABLE);
+    update_want_w();
 
     perf_freq = SDL_GetPerformanceFrequency();
     perf_base = SDL_GetPerformanceCounter();

@@ -165,6 +165,11 @@ that starts with a `level` segment starts in that level, like `--level N`. While
 `KEEN_FIND=N` lists the tiles with behaviour N in each level, and `KEEN_FIND=tN` the tiles
 with tile number N, as an aid for writing `warp` lines.
 
+`KEEN_VIEW_W=N` (a test aid, 320 to 480) sets the width of the picture a level or the world map is
+drawn at, in a headless replay too, instead of following the window. `shot` lines then give a PNG
+that wide. The view width only changes what is drawn and which sounds are heard, so `tests/run.sh`
+replays `coop-levels-1-4` at 320 and at 480 and compares the checksums.
+
 ### Tests
 
 ```

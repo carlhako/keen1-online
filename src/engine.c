@@ -110,6 +110,7 @@ void rng_seed(uint32_t t)
 void frame_start(void)
 {
     rf_begin();
+    plat_wide(view_wide);       /* a resized window shows from this frame on */
     if (plat_fast) {
         /* online catch-up: no pacing, the game just runs */
     } else if (plat_headless()) {
@@ -133,8 +134,19 @@ void frame_start(void)
     gtick += SIM_TICS;
 }
 
+/* On the single-player world map scroll_x/scroll_y are the camera itself (the game record keeps
+ * them), so a wide view is placed around the camera only while drawing. */
+int view_map_cam;
+
 void frame_refresh(void)
 {
+    if (view_map_cam) {
+        int32_t cx = scroll_x;
+        scroll_x = view_left(cx);
+        rf_refresh();
+        scroll_x = cx;
+        return;
+    }
     rf_refresh();
 }
 
@@ -1324,6 +1336,15 @@ void palettes_init(void)
  * scheme and a P1/P2 tag above him (levels and the world map). */
 void draw_keen(int32_t x, int32_t y, int sprite, int slot)
 {
+    if (view_map_cam) {         /* queued at the placed scroll, see frame_refresh */
+        int32_t cx = scroll_x;
+        scroll_x = view_left(cx);
+        view_map_cam = 0;
+        draw_keen(x, y, sprite, slot);
+        view_map_cam = 1;
+        scroll_x = cx;
+        return;
+    }
     if (nplayers > 1) {
         char tag[3] = {'P', (char)('1' + slot), 0};
         rf_sprite_ex(x, y, sprite, slot & 1);
@@ -1370,9 +1391,31 @@ static int jitter(void)
     return (int)(jitter_state >> 24) % 0x40 - 0x20;
 }
 
+/* Where the left edge of the drawn frame is for a camera at cam_x. The original showed 320
+ * pixels from the camera; a wider view puts the extra width evenly on both sides, then moves
+ * only as far as needed to stay inside what the original could ever show, [scrollmin_x,
+ * scrollmax_x + 320 pixels). A level narrower than the view is centred, and the renderer
+ * paints what is outside that range black. This is drawing only: the camera is never changed. */
+int32_t view_left(int32_t cam_x)
+{
+    if (scr_w <= SCR_BASEW)
+        return cam_x;
+    int32_t w = (int32_t)scr_w << 8, lo = scrollmin_x, hi = scrollmax_x + (SCR_BASEW << 8);
+    view_lo = lo;
+    view_hi = hi;
+    if (hi - lo < w)
+        return lo - (w - (hi - lo)) / 2;
+    int32_t x = cam_x - (w - (SCR_BASEW << 8)) / 2;
+    if (x > hi - w)
+        x = hi - w;
+    if (x < lo)
+        x = lo;
+    return x;
+}
+
 void draw_camera(void)
 {
-    scroll_x = players[local_player].cam_x;
+    scroll_x = view_left(players[local_player].cam_x);
     scroll_y = players[local_player].cam_y;
     if (game.shake) {
         scroll_x -= jitter() << 8;
@@ -1387,7 +1430,8 @@ void draw_camera(void)
 static int heard_at(int32_t x, int32_t y)
 {
     const player_t *p = &players[local_player];
-    return x > p->cam_x - 0x1000 && x < p->cam_x + 0x15000 &&
+    int32_t left = view_left(p->cam_x);      /* the view actually drawn, 0x14000 wide for 320 */
+    return x > left - 0x1000 && x < left + ((int32_t)scr_w << 8) + 0x1000 &&
            y > p->cam_y - 0x1000 && y < p->cam_y + 0xd800;
 }
 
@@ -1547,7 +1591,7 @@ static int play_level_run(int num)
         }
         draw_camera();
         for (int i = numobjs - 1; i >= 0; i--)
-            if (objs[i].type && objs[i].active)
+            if (objs[i].type)           /* a sleeping actor is drawn where it stands */
                 draw_obj(&objs[i], i);
         for (int i = 0; i < nplayers; i++)
             if (objs[i].type) {
@@ -1628,7 +1672,12 @@ int play_level(int num)
                                    : game_seed + 0x9e3779b1u * (uint32_t)game.levels_started;
     rng_seed(seed);
     record_level_begin(num, seed);
+    int wide = view_wide, map_cam = view_map_cam;
+    plat_wide(1);                   /* a level is a wide view; draw_camera places it */
+    view_map_cam = 0;
     int r = play_level_run(num);
+    plat_wide(wide);
+    view_map_cam = map_cam;
     record_level_end();
     return r;
 }

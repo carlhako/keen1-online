@@ -4,11 +4,18 @@
 
 #include <stdint.h>
 
-#define SCR_W 320
+#define SCR_BASEW 320           /* the original picture, and every fixed screen */
+/* The widest picture drawn (1.5 times the original) and the row stride of `screen`. An awake
+ * enemy is put to sleep 9 tiles outside the camera area, so the view may show at most 5 extra
+ * tiles each side (480 - 320 = 160 pixels = 5 tiles per side) before it could show a frozen one. */
+#define SCR_MAXW 480
 #define SCR_H 200
 
-/* EGA 4-bit pixels shown on screen. */
-extern uint8_t screen[SCR_W * SCR_H];
+/* EGA 4-bit pixels shown on screen: SCR_H rows of SCR_MAXW, of which scr_w columns are drawn. */
+extern uint8_t screen[SCR_MAXW * SCR_H];
+extern int scr_w;                /* width of the frame being drawn, SCR_BASEW to SCR_MAXW */
+extern int view_wide;            /* the picture is a view of a level or the world map: scr_w may exceed SCR_BASEW */
+void plat_wide(int on);          /* set view_wide, and scr_w from the window (SCR_BASEW when off) */
 
 int plat_init(int scale, int fullscreen);
 /* Headless: no window, audio or real-time pacing (replay tests). Set before
@@ -24,6 +31,7 @@ void plat_shutdown(void);
 void plat_set_palette(const uint8_t regs[17]);
 void plat_set_border(int v);
 void plat_present(void);
+int plat_view_w(void);                             /* widest picture the window allows */
 void plat_screenshot(const char *path);            /* test aid: the screen to a PNG */
 
 /* The original reprograms the PIT to 1193182/8192 Hz. */

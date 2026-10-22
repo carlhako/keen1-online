@@ -481,7 +481,7 @@ void show_pic(const char *name)
                 for (int pl = 0; pl < 4; pl++)
                     if (pic[pl * 0x2000 + off] & m)
                         c |= 1 << pl;
-                screen[y * SCR_W + xb * 8 + bit] = (uint8_t)c;
+                screen[y * SCR_MAXW + xb * 8 + bit] = (uint8_t)c;
             }
         }
     free(pic);
@@ -647,12 +647,24 @@ void text_viewer(const uint8_t *text, int top, int bot)
 /* 0x9FE9: F1 help */
 void help_screen(void)
 {
+    /* The help pages are 320 wide, so a wide view is narrowed meanwhile and put back. */
+    int wide = view_wide, map_cam = view_map_cam;
     int32_t sx = scroll_x, sy = scroll_y;
+    if (wide) {
+        plat_wide(0);
+        view_map_cam = 0;
+        if (!map_cam)
+            scroll_x = players[local_player].cam_x;     /* the original's 320 pixels */
+    }
     scroll_x &= ~0xfff;
     scroll_y &= ~0xfff;
     text_viewer(txt_help, 1, 0x14);
     scroll_x = sx;
     scroll_y = sy;
+    if (wide) {
+        plat_wide(1);
+        view_map_cam = map_cam;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -938,9 +950,9 @@ static int statue_lines(char (*lines)[40])
 static void edge_arrow(int32_t wx, int32_t wy)
 {
     float tx = (float)(wx - scroll_x) / 256 + 8, ty = (float)(wy - scroll_y) / 256 + 8;
-    if (tx >= 0 && tx < SCR_W && ty >= 0 && ty < SCR_H)
+    if (tx >= 0 && tx < scr_w && ty >= 0 && ty < SCR_H)
         return;
-    float cx = SCR_W / 2.0f, cy = SCR_H / 2.0f, dx = tx - cx, dy = ty - cy;
+    float cx = scr_w / 2.0f, cy = SCR_H / 2.0f, dx = tx - cx, dy = ty - cy;
     float len = sqrtf(dx * dx + dy * dy);
     if (len < 1)
         return;
@@ -948,7 +960,7 @@ static void edge_arrow(int32_t wx, int32_t wy)
     dy /= len;
     /* from the centre along (dx, dy) to the screen edge, inset a little */
     float t = 1e9f;
-    if (dx > 0) t = fminf(t, (SCR_W - 14 - cx) / dx);
+    if (dx > 0) t = fminf(t, (scr_w - 14 - cx) / dx);
     if (dx < 0) t = fminf(t, (14 - cx) / dx);
     if (dy > 0) t = fminf(t, (SCR_H - 14 - cy) / dy);
     if (dy < 0) t = fminf(t, (14 - cy) / dy);
@@ -960,12 +972,12 @@ static void edge_arrow(int32_t wx, int32_t wy)
             int in = u >= -8 && u <= 8 && fabsf(v) <= (8 - u) * 0.6f;
             int edge = u >= -9 && u <= 9 && fabsf(v) <= (9 - u) * 0.6f + 1;
             int sx = (int)(px + x), sy = (int)(py + y);
-            if (sx < 0 || sx >= SCR_W || sy < 0 || sy >= SCR_H)
+            if (sx < 0 || sx >= scr_w || sy < 0 || sy >= SCR_H)
                 continue;
             if (in)
-                screen[sy * SCR_W + sx] = 14;
+                screen[sy * SCR_MAXW + sx] = 14;
             else if (edge)
-                screen[sy * SCR_W + sx] = 0;
+                screen[sy * SCR_MAXW + sx] = 0;
         }
 }
 
