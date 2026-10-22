@@ -47,8 +47,9 @@ WEB_FLAGS := -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -sUSE_SDL=2 \
 # told to reload.
 web: $(WEB_OUT)/index.html
 
-$(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/net.js web/shell.html
+$(WEB_OUT)/index.html: $(SRC) src/*.h web/pre.js web/net.js web/shell.html web/lobby-bg.png
 	mkdir -p $(WEB_OUT)
+	cp web/lobby-bg.png $(WEB_OUT)/
 	$(EMCC) $(WEB_FLAGS) -o $@ $(SRC)
 	@id=$$(sha256sum $(WEB_OUT)/index.wasm | cut -c1-16); \
 	echo $$id > $(WEB_OUT)/build-id.txt; \

@@ -20,6 +20,7 @@
   }
   /* The game draws 320x200 stretched to 4:3, like a CRT. */
   #screen {
+    --px: calc(min(100vw, 100vh * 4 / 3) / 320);   /* one pixel of the game's 320x200 screen */
     position: relative;
     width: min(100vw, calc(100vh * 4 / 3));
     aspect-ratio: 4 / 3;
@@ -46,6 +47,25 @@
     background: #0000aa;
   }
   .overlay[hidden] { display: none; }
+  /* The lobby sits on Keen's portrait; its text goes in the game's own window frame (the font's
+     frame tiles, a white fill), see-through so the picture shows. */
+  #lobby {
+    background: #0000aa url(lobby-bg.png) center 30% / cover no-repeat;
+    image-rendering: pixelated;
+    justify-content: space-evenly;
+    gap: 0;
+    color: #000;
+  }
+  .panel {
+    box-sizing: border-box;
+    max-width: 100%;
+    border: calc(8 * var(--px)) solid transparent;
+    border-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAhElEQVR42mNgYGB4SmMMYfz///82DK9ateo2uhg+jEs/3AJ0SRgmxhJC+lEsQJYMDQ0FK0AWw4YJ6YdbgC5JqgW49DOgGwKThClA5mPDhPTDI5kcw9EtwWI4IojQkxeaIryYgH7MSEJ2BSmpCGccjFowasEQsYCmGW20PhitDyivD2iJAZM2UIyhRNwdAAAAAElFTkSuQmCC) 8 fill / calc(8 * var(--px)) stretch;
+    image-rendering: pixelated;
+    padding: 0.1em 0.8em;
+  }
+  .panel[hidden] { display: none; }
+  .panel.main { display: flex; flex-direction: column; align-items: center; gap: 0.5em; }
   h1 {
     margin: 0;
     color: #ffff55;
@@ -53,6 +73,8 @@
     letter-spacing: 0.04em;
   }
   h1 small { display: block; color: #55ffff; font-size: 0.55em; letter-spacing: 0; }
+  #lobby h1 { color: #aa0000; }
+  #lobby h1 small { color: #0000aa; }
   #start { cursor: pointer; }
   #prompt { color: #ffffff; min-height: 1.5em; }
   #start.ready #prompt { animation: blink 1.2s steps(2, start) infinite; }
@@ -60,6 +82,9 @@
   table { border-collapse: collapse; font-size: clamp(11px, 1.8vw, 15px); }
   td { padding: 0 0.6em; text-align: left; }
   td:first-child { color: #55ff55; text-align: right; }
+  #lobby td:first-child { color: #0000aa; }
+  #lobby tbody { display: grid; grid-template-columns: repeat(2, auto); column-gap: 1.5em; justify-content: center; }
+  #lobby tr { display: flex; }
   button {
     font: inherit;
     color: #000;
@@ -70,6 +95,7 @@
   }
   button:focus-visible { outline: 2px solid #ffff55; outline-offset: 2px; }
   .fine { font-size: 12px; color: #5555ff; max-width: 40em; }
+  #lobby .fine { color: #555555; }
   button:disabled { background: #5555ff; color: #aaaaaa; cursor: default; }
   button.quiet { background: #aaaaaa; }
   .row { display: flex; gap: 0.75em; flex-wrap: wrap; justify-content: center; }
@@ -78,34 +104,38 @@
     display: flex; gap: 0.75em; align-items: center; justify-content: space-between;
     padding: 0.15em 0.6em; font-size: clamp(11px, 1.9vw, 15px);
   }
-  #games li:nth-child(odd) { background: #0000cc; }
-  #games .name { color: #55ff55; min-width: 5em; text-align: left; }
-  #games .where { flex: 1; text-align: left; color: #ffffff; }
-  #games .seats { color: #ffff55; }
+  #games li:nth-child(odd) { background: rgba(0, 0, 170, 0.12); }
+  #games .name { color: #0000aa; min-width: 5em; text-align: left; }
+  #games .where { flex: 1; text-align: left; color: #000; }
+  #games .seats { color: #aa0000; }
   #games li button { padding: 0 0.8em; }
   #browse { flex: none; display: flex; flex-direction: column; align-items: center; gap: 0.75em; width: 100%; }
   /* The key list and the fine print make room for the saves and the table. */
-  #lobby[data-view="saves"] table, #lobby[data-view="scores"] table,
-  #lobby[data-view="saves"] .fine, #lobby[data-view="scores"] .fine { display: none; }
-  #none { color: #5555ff; margin: 0; }
+  #lobby[data-view="saves"] .help, #lobby[data-view="scores"] .help { display: none; }
+  #none { color: #555555; margin: 0; }
   #saves, #scores { list-style: none; margin: 0; padding: 0; width: min(36em, 100%); max-height: 11em; overflow-y: auto; }
   #scores { max-height: none; overflow: visible; }
   #saves li, #scores li {
     display: flex; gap: 0.75em; align-items: center; justify-content: space-between;
     padding: 0.15em 0.6em; font-size: clamp(11px, 1.9vw, 15px);
   }
-  #saves li:nth-child(odd), #scores li:nth-child(odd) { background: #0000cc; }
-  #saves .name, #scores .name { color: #55ff55; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #saves .detail { color: #ffffff; white-space: nowrap; }
-  #saves .when { color: #55ffff; white-space: nowrap; }
+  #saves li:nth-child(odd), #scores li:nth-child(odd) { background: rgba(0, 0, 170, 0.12); }
+  #saves .name, #scores .name { color: #0000aa; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #saves .detail { color: #000; white-space: nowrap; }
+  #saves .when { color: #555555; white-space: nowrap; }
   #saves li button { padding: 0 0.8em; }
-  #scores .rank { color: #ffff55; width: 1.5em; text-align: right; }
-  #scores .points { color: #ffffff; min-width: 5em; text-align: right; }
-  #scores .parts { letter-spacing: 0.15em; color: #5555ff; }
-  #scores .parts b { color: #ffff55; font-weight: normal; }
+  #scores .rank { color: #aa0000; width: 1.5em; text-align: right; }
+  #scores .points { color: #000; min-width: 5em; text-align: right; }
+  #scores .parts { letter-spacing: 0.15em; color: #555555; }
+  #scores .parts b { color: #aa0000; font-weight: normal; }
   #msg { color: #ffffff; min-height: 1.5em; margin: 0; }
   #msg.bad { color: #ff5555; }
+  #lobby #msg { color: #000; }
+  #lobby #msg.bad { color: #aa0000; }
   #waiting h2 { margin: 0; color: #ffffff; font-size: clamp(14px, 3vw, 24px); }
+  #lobby #waiting h2 { color: #000; }
+  #waiting[hidden] { display: none; }
+  #waiting { display: flex; flex-direction: column; align-items: center; gap: 0.75em; }
   /* Over the game: who the game waits for, and a disconnected partner. */
   #status {
     position: absolute; left: 50%; bottom: 3%; transform: translateX(-50%);
@@ -121,41 +151,47 @@
   <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 
   <div id="lobby" class="overlay">
-    <h1>Commander Keen<small>Episode One: Marooned on Mars &middot; online co-op</small></h1>
-    <p id="msg">Connecting&hellip;</p>
-    <div id="browse">
-      <ul id="games"></ul>
-      <p id="none" hidden>No games running. Start one!</p>
-      <ul id="saves" hidden></ul>
-      <p id="nosaves" hidden>No saved games yet. Press F5 on the world map to save one.</p>
-      <ul id="scores" hidden></ul>
-      <div class="row">
-        <button id="new" type="button" disabled>New game</button>
-        <button id="retry" type="button" class="quiet" hidden>Retry</button>
-        <button id="loadgame" type="button" class="quiet">Load game</button>
-        <button id="highscores" type="button" class="quiet">High scores</button>
-        <button id="back" type="button" class="quiet" hidden>Back</button>
+    <div class="panel">
+      <h1>Commander Keen<small>Episode One: Marooned on Mars &middot; online co-op</small></h1>
+    </div>
+    <div class="panel main">
+      <p id="msg">Connecting&hellip;</p>
+      <div id="browse">
+        <ul id="games"></ul>
+        <p id="none" hidden>No games running. Start one!</p>
+        <ul id="saves" hidden></ul>
+        <p id="nosaves" hidden>No saved games yet. Press F5 on the world map to save one.</p>
+        <ul id="scores" hidden></ul>
+        <div class="row">
+          <button id="new" type="button" disabled>New game</button>
+          <button id="retry" type="button" class="quiet" hidden>Retry</button>
+          <button id="loadgame" type="button" class="quiet">Load game</button>
+          <button id="highscores" type="button" class="quiet">High scores</button>
+          <button id="back" type="button" class="quiet" hidden>Back</button>
+        </div>
+      </div>
+      <div id="waiting" hidden>
+        <h2>Waiting for player 2&hellip;</h2>
+        <div class="row">
+          <button id="single" type="button">Play single player</button>
+          <button id="cancel" type="button" class="quiet">Leave</button>
+        </div>
       </div>
     </div>
-    <div id="waiting" hidden>
-      <h2>Waiting for player 2&hellip;</h2>
-      <div class="row">
-        <button id="single" type="button">Play single player</button>
-        <button id="cancel" type="button" class="quiet">Leave</button>
-      </div>
+    <div class="panel help">
+      <table>
+        <tr><td>Arrows</td><td>move</td></tr>
+        <tr><td>Ctrl</td><td>jump</td></tr>
+        <tr><td>Alt</td><td>pogo stick</td></tr>
+        <tr><td>Ctrl+Alt</td><td>fire raygun</td></tr>
+        <tr><td>Space</td><td>status</td></tr>
+        <tr><td>C</td><td>chat</td></tr>
+        <tr><td>Esc</td><td>menu</td></tr>
+      </table>
+      <div class="fine">Shareware v1.31 &middot; Two players share one game. Ctrl+W still closes the tab:
+        redefine the keys with F3 on the world map if you like.</div>
+      <div id="loading" class="fine">Loading game data&hellip;</div>
     </div>
-    <table>
-      <tr><td>Arrows</td><td>move</td></tr>
-      <tr><td>Ctrl</td><td>jump</td></tr>
-      <tr><td>Alt</td><td>pogo stick</td></tr>
-      <tr><td>Ctrl+Alt</td><td>fire raygun</td></tr>
-      <tr><td>Space</td><td>status</td></tr>
-      <tr><td>C</td><td>chat</td></tr>
-      <tr><td>Esc</td><td>menu</td></tr>
-    </table>
-    <div class="fine">Shareware v1.31 &middot; Two players share one game. Ctrl+W still closes the tab:
-      redefine the keys with F3 on the world map if you like.</div>
-    <div id="loading" class="fine">Loading game data&hellip;</div>
   </div>
 
   <div id="status" hidden></div>

@@ -40,6 +40,7 @@ later builds take a few seconds. The output lands in `build/web/`:
 | `index.html` | the page: lobby, game canvas, keyboard handling |
 | `index.js` | Emscripten runtime and loader |
 | `index.wasm` | the compiled game |
+| `lobby-bg.png` | the picture behind the lobby (copied from `web/`) |
 | `build-id.txt` | a hash of `index.wasm`, also inside the page: the server refuses a page from another build |
 
 `make clean` removes it along with the native build.

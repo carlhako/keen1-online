@@ -8,6 +8,8 @@ so add the entry with the version bump.
 
 ### What's new
 
+- **A Keen portrait behind the lobby.** The menu where you pick a game now sits on a picture of
+  Keen, and its text is in the game's own white window frames, see-through so the picture shows.
 - **More shots from each raygun.** In co-op a raygun pickup gives 7 shots instead of 5. All
   players share one ammo counter, so there are more shots wasted. Single-player games still give 5.
 - **Switching away no longer drops you from an online game.** A hidden tab sends no input, and
