@@ -4,6 +4,26 @@ Each released version has a section headed `## <version> - <date>`. The release 
 publishes that section as the GitHub release notes. A tag without a section here is not published,
 so add the entry with the version bump.
 
+## 0.2.1 - 2026-10-22
+
+### What's new
+
+- **The README leads with the install.** It is now a short page: what the game is, the two
+  install commands, requirements, how to play and the controls. Everything else moved to
+  `docs/guide.md` (running a server: installer options, game data, settings, TLS reverse proxy,
+  Proxmox notes, releasing) and `docs/development.md` (building, testing, replays, co-op rules).
+  Both guides are in the release package next to the README.
+- **The installer cannot run half-downloaded.** `install.sh` does all its work in a function
+  called on its last line, so a `curl | bash` cut off part way through runs nothing. CI checks
+  this for every possible cut.
+- **No native player package.** `make dist` and its launcher script are gone, and the docs no
+  longer describe playing the game as a Linux program. The native build stays as the tool the
+  determinism tests use.
+
+### Upgrading
+
+Run the installer again. Nothing else changes: the same paths, options and service.
+
 ## 0.2.0 - 2026-10-22
 
 ### What's new

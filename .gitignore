@@ -1,8 +1,6 @@
 # Build output
 build/
 /keen1
-keen1-linux-x86_64/
-keen1-linux-x86_64.tar.gz
 
 # Original game files are not distributed: supply your own copy
 *.zip

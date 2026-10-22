@@ -30,7 +30,7 @@ const gameDir = join(dataDir, 'game');
 console.log(
   gameDataComplete(gameDir)
     ? `serving the game files from ${gameDir}`
-    : `NO GAME DATA in ${gameDir}: the page cannot start a game (see the README, "Game data")`,
+    : `NO GAME DATA in ${gameDir}: the page cannot start a game (see docs/guide.md#game-data)`,
 );
 function readVersion(): string | undefined {
   try {

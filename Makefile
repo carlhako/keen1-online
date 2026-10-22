@@ -1,10 +1,10 @@
-# Commander Keen 1 for Linux (SDL2)
+# Commander Keen 1 online: the game is the browser build, served by the server in server/.
 #
-#   make            build ./keen1
-#   make dist       build and package keen1-linux-x86_64.tar.gz with the game data
-#   make web        browser build in build/web/ (Emscripten; needs emcc on PATH,
+#   make web        the game: browser build in build/web/ (Emscripten; needs emcc on PATH,
 #                   e.g. source ~/tools/emsdk/emsdk_env.sh)
 #   make release    package the online server and web build as keen1-online-<version>.tar.gz
+#   make            build ./keen1, the native (SDL2) build the determinism tests and replays use
+#   make test       run those tests (tests/run.sh; needs the shareware files in shareware/data)
 #
 # SDL2 is found with sdl2-config / pkg-config. Without development packages,
 # point SDL2_DIR at a directory containing include/SDL2/*.h and lib/libSDL2.so.
@@ -14,7 +14,6 @@ CFLAGS  ?= -O2 -g
 CFLAGS  += -std=gnu11 -Wall -Wextra -Wno-unused-parameter
 SRC     := $(wildcard src/*.c)
 OBJ     := $(SRC:src/%.c=build/%.o)
-GAMEZIP ?= Commander Keen 1 Marooned On Mars (1990)(Apogee Software).zip
 
 ifdef SDL2_DIR
   SDL_CFLAGS := -I$(SDL2_DIR)/include
@@ -32,24 +31,6 @@ build/%.o: src/%.c src/*.h | build
 
 build:
 	mkdir -p build
-
-DIST := keen1-linux-x86_64
-dist: keen1
-	rm -rf $(DIST) $(DIST).tar.gz
-	mkdir -p $(DIST)/data
-	cp keen1 $(DIST)/
-	# Game data: the clean v1.31 shareware files when extracted (tools/unshr.py),
-	# otherwise the bundled zip; saves, scores and key settings come from the zip.
-	unzip -q -o "$(GAMEZIP)" -d $(DIST)/data
-	if [ -d shareware/data ]; then \
-		for f in shareware/data/*; do \
-			rm -f "$(DIST)/data/$$(basename "$$f" | tr A-Z a-z)"; cp "$$f" $(DIST)/data/; \
-		done; \
-	fi
-	cp README.md $(DIST)/
-	cp packaging/keen1.sh $(DIST)/run.sh
-	chmod +x $(DIST)/run.sh
-	tar czf $(DIST).tar.gz $(DIST)
 
 # Browser build. The blocking DOS-style loops stay as they are: ASYNCIFY
 # lets plat_vsync() yield to the browser. No game data is bundled: web/pre.js
@@ -87,7 +68,7 @@ $(NODE_OUT)/keen1.js: $(SRC) src/*.h
 	$(EMCC) $(NODE_FLAGS) -o $@ $(SRC)
 
 # Headless WebAssembly build for Node that plays online through web/net.js (a test client for
-# tests/online): `make nodenet`, then see tests/online/README.md.
+# tests/online): `make nodenet` or `make test-online`, see docs/development.md#tests.
 NODENET_OUT := build/nodenet
 NODENET_FLAGS := $(NODE_FLAGS) -DKEEN_NODE_NET -sINVOKE_RUN=0 -sEXPORTED_RUNTIME_METHODS=callMain \
 	-sMODULARIZE -sEXPORT_NAME=createKeen --pre-js web/net.js
@@ -109,8 +90,9 @@ test-online: nodenet
 	node --test tests/online/e2e.test.mjs
 
 # Release package of the online game: the built server, the web build, the example config, the
-# installer, the data unpacker (tools/unshr.py) and the README. It holds no game data: the installer
-# fetches the shareware files, and the check below fails the build if any got in. It runs with
+# installer, the data unpacker (tools/unshr.py), the README and the guides in docs/ it links to. It
+# holds no game data: the installer fetches the shareware files, and the check below fails the build
+# if any got in. It runs with
 # Node 22 and `npm ci --omit=dev` in server/, no build step. The version is the one in
 # server/package.json. The tree must be clean, so a release always matches a commit. Needs emcc
 # on PATH (see `make web`). Releases are published by .github/workflows/release.yml from a tag.
@@ -131,6 +113,7 @@ release:
 	mkdir -p $(RELEASE_DIR)/$(RELEASE)/tools
 	cp tools/unshr.py $(RELEASE_DIR)/$(RELEASE)/tools/
 	cp server/config.example.json .nvmrc README.md $(RELEASE_DIR)/$(RELEASE)/
+	cp -r docs $(RELEASE_DIR)/$(RELEASE)/docs
 	git rev-parse HEAD > $(RELEASE_DIR)/$(RELEASE)/COMMIT
 	tar czf $(RELEASE).tar.gz -C $(RELEASE_DIR) $(RELEASE)
 	@if tar -tzf $(RELEASE).tar.gz | grep -iE '\.(ck1|shr)$$|keen1\.exe$$|index\.data$$'; then \
@@ -138,6 +121,6 @@ release:
 	@echo "built $(RELEASE).tar.gz from $$(git rev-parse --short HEAD)"
 
 clean:
-	rm -rf build keen1 $(DIST) $(DIST).tar.gz keen1-online-*.tar.gz
+	rm -rf build keen1 keen1-online-*.tar.gz
 
-.PHONY: dist web node nodenet test test-online release clean
+.PHONY: web node nodenet test test-online release clean
