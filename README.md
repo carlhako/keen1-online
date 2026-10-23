@@ -8,6 +8,16 @@ shareware episode and checks every file, so no game data is in this repository. 
 the [keen-clone](https://github.com/carlhako/keen-clone) port, rebuilt from the original
 `KEEN1.EXE` with REA and Ghidra, made deterministic for lockstep play.
 
+<p align="center">
+  <img src="docs/screenshots/main-menu.png" alt="The main menu" width="32%">
+  <img src="docs/screenshots/lobby.png" alt="The lobby with a game waiting for a second player" width="32%">
+  <img src="docs/screenshots/level-coop.png" alt="Two players in level 1" width="32%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/chat.png" alt="Players chatting in game (press C)" width="49%">
+  <img src="docs/screenshots/level-coop-2.png" alt="Two players walking through level 1" width="49%">
+</p>
+
 ## Install
 
 On Debian 12 or newer, or a Proxmox LXC made from a Debian template, as root. A fresh LXC has no
